@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kevinwolrath/prompt-driven-scraper/schemas/source-profile.schema.json",
+  "title": "Source profile",
+  "description": "Declarative description of how the deterministic engine requests one source and maps its content to generic output fields. Unknown keys are rejected by the runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "request", "listing", "fields"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "format": { "enum": ["html", "json"], "default": "html" },
+    "request": { "$ref": "#/$defs/request" },
+    "limits": { "$ref": "#/$defs/limits" },
+    "pagination": { "$ref": "#/$defs/pagination" },
+    "listing": { "$ref": "#/$defs/listing" },
+    "ignore": {
+      "description": "CSS selectors removed from every HTML page before extraction.",
+      "type": "array", "items": { "type": "string" }
+    },
+    "fields": {
+      "description": "Output field name -> extraction rule.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/fieldRule" }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https?://" },
+        "params": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/paramMapping" }
+        },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "paramMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string", "description": "Name of a generic query param." },
+        "value": { "type": ["string", "number", "boolean"], "description": "Constant value." },
+        "map": { "type": "object", "additionalProperties": { "type": "string" } },
+        "unmapped": { "enum": ["omit", "pass", "fail"] }
+      },
+      "oneOf": [ { "required": ["from"] }, { "required": ["value"] } ]
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxPages": { "type": "integer", "minimum": 0 },
+        "maxRecords": { "type": "integer", "minimum": 0 },
+        "delayMs": { "type": "integer", "minimum": 0 },
+        "retries": { "type": "integer", "minimum": 0 },
+        "timeoutSeconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "next": { "$ref": "#/$defs/fieldRule" },
+        "param": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "start": { "type": "integer" },
+            "step": { "type": "integer" }
+          }
+        },
+        "totalResults": { "$ref": "#/$defs/fieldRule" },
+        "pageSize": { "type": "integer", "minimum": 1 },
+        "totalPages": { "$ref": "#/$defs/fieldRule" }
+      },
+      "not": { "required": ["next", "param"] }
+    },
+    "listing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "string", "description": "CSS selector (html) or JSON path (json) selecting one entry per record." },
+        "skip": { "type": "array", "items": { "$ref": "#/$defs/matcher" } },
+        "detailLink": { "$ref": "#/$defs/fieldRule" },
+        "followDetail": { "type": "boolean" }
+      }
+    },
+    "candidateProps": {
+      "from": { "enum": ["item", "listing", "detail"] },
+      "css": { "type": "string" },
+      "attr": { "type": "string" },
+      "jsonld": { "type": "string" },
+      "jsonldType": { "type": "string" },
+      "json": { "type": "string" },
+      "meta": { "type": "string" },
+      "const": { "type": ["string", "number", "boolean"] },
+      "builtin": { "enum": ["pageUrl", "detailUrl", "listingUrl", "sourceId"] }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/candidateProps/from" },
+        "css": { "$ref": "#/$defs/candidateProps/css" },
+        "attr": { "$ref": "#/$defs/candidateProps/attr" },
+        "jsonld": { "$ref": "#/$defs/candidateProps/jsonld" },
+        "jsonldType": { "$ref": "#/$defs/candidateProps/jsonldType" },
+        "json": { "$ref": "#/$defs/candidateProps/json" },
+        "meta": { "$ref": "#/$defs/candidateProps/meta" },
+        "const": { "$ref": "#/$defs/candidateProps/const" },
+        "builtin": { "$ref": "#/$defs/candidateProps/builtin" }
+      },
+      "anyOf": [
+        { "required": ["css"] }, { "required": ["attr"] }, { "required": ["jsonld"] }, { "required": ["json"] },
+        { "required": ["meta"] }, { "required": ["const"] }, { "required": ["builtin"] }
+      ]
+    },
+    "fieldRule": {
+      "description": "Either one inline candidate or an ordered candidates list, plus reject/prefer/transform.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/candidateProps/from" },
+        "css": { "$ref": "#/$defs/candidateProps/css" },
+        "attr": { "$ref": "#/$defs/candidateProps/attr" },
+        "jsonld": { "$ref": "#/$defs/candidateProps/jsonld" },
+        "jsonldType": { "$ref": "#/$defs/candidateProps/jsonldType" },
+        "json": { "$ref": "#/$defs/candidateProps/json" },
+        "meta": { "$ref": "#/$defs/candidateProps/meta" },
+        "const": { "$ref": "#/$defs/candidateProps/const" },
+        "builtin": { "$ref": "#/$defs/candidateProps/builtin" },
+        "candidates": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/candidate" } },
+        "reject": { "type": "array", "items": { "$ref": "#/$defs/matcher" } },
+        "prefer": { "type": "array", "items": { "$ref": "#/$defs/matcher" } },
+        "transform": { "type": "array", "items": { "$ref": "#/$defs/transform" } }
+      },
+      "anyOf": [
+        { "required": ["candidates"] },
+        { "required": ["css"] }, { "required": ["attr"] }, { "required": ["jsonld"] }, { "required": ["json"] },
+        { "required": ["meta"] }, { "required": ["const"] }, { "required": ["builtin"] }
+      ]
+    },
+    "matcher": {
+      "description": "All properties set must hold. In a list, any matcher matching is enough.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "contains": { "type": "string" },
+        "equals": { "type": "string" },
+        "regex": { "type": "string" },
+        "css": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "caseSensitive": { "type": "boolean" }
+      }
+    },
+    "transform": {
+      "oneOf": [
+        { "enum": ["trim", "lower", "upper", "collapseWhitespace", "number", "currency", "integer", "decimal", "boolean", "absoluteUrl"] },
+        {
+          "type": "object", "additionalProperties": false, "required": ["regex"],
+          "properties": { "regex": { "type": "string" } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["replace"],
+          "properties": {
+            "replace": {
+              "type": "object", "additionalProperties": false, "required": ["from"],
+              "properties": { "from": { "type": "string", "minLength": 1 }, "to": { "type": "string" } }
+            }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["map"],
+          "properties": { "map": { "type": "object", "minProperties": 1 } }
+        }
+      ]
+    }
+  }
+}

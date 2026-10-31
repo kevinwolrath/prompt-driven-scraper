@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kevinwolrath/prompt-driven-scraper/schemas/job.schema.json",
+  "title": "Scrape job",
+  "description": "QueryInput + SearchSources + Output. Unknown keys are rejected by the runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "queryInput", "searchSources", "output"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "queryInput": { "type": "string", "description": "The user's request in their own words." },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "description": "Generic named query values that source profiles map to request parameters.",
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "filters": {
+          "description": "Deterministic filters applied to every record after type coercion.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "op", "value"],
+            "properties": {
+              "field": { "type": "string" },
+              "op": { "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "in", "contains"] },
+              "value": {},
+              "missing": { "enum": ["reject", "pass"] }
+            }
+          }
+        }
+      }
+    },
+    "searchSources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string" },
+          "profileRef": { "type": "string" },
+          "profile": { "$ref": "source-profile.schema.json" }
+        },
+        "oneOf": [ { "required": ["profileRef"] }, { "required": ["profile"] } ]
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "fields"],
+      "properties": {
+        "format": { "enum": ["json", "csv"] },
+        "fields": {
+          "oneOf": [
+            {
+              "description": "Compact form: name -> type; a trailing ? marks the field optional.",
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": { "enum": ["string", "integer", "decimal", "boolean", "url", "string?", "integer?", "decimal?", "boolean?", "url?"] }
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "type"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "type": { "enum": ["string", "integer", "decimal", "boolean", "url"] },
+                  "required": { "type": "boolean" }
+                }
+              }
+            }
+          ]
+        },
+        "dedupeBy": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

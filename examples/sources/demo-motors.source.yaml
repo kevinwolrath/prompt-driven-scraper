@@ -1,0 +1,103 @@
+# Source profile for the bundled Demo Motors marketplace (HTML).
+# Start it with `scraper demo-site` or `api` (both serve it on 127.0.0.1:8089).
+id: demo-motors
+name: Demo Motors (HTML)
+description: Deterministic demo marketplace with listing pages and vehicle detail pages.
+format: html
+
+request:
+  url: http://127.0.0.1:8089/demo/cars
+  params:
+    fuel:
+      from: fuel
+      map: { electric: EV, petrol: Petrol, hybrid: Hybrid }
+    minYear:
+      from: yearMin   # sent, but the site ignores it - query.filters enforce it
+
+limits:
+  maxPages: 10
+  delayMs: 150
+  retries: 1
+
+pagination:
+  next: { from: listing, css: "nav.pagination a.next", attr: href }
+  totalResults:
+    from: listing
+    css: ".result-count"
+    transform: [number, integer]
+  pageSize: 4
+
+listing:
+  items: "article.listing-card"
+  skip:
+    - css: ".sponsored"            # ad tiles inside the results grid
+  detailLink: { css: "a.details", attr: href }
+  followDetail: true
+
+# Removed from every page before extraction: header promos and finance boxes
+# contain price-like text that is not the vehicle price.
+ignore:
+  - ".site-header"
+  - ".finance-box"
+
+fields:
+  make:
+    candidates:
+      - { from: detail, jsonld: brand.name, jsonldType: Car }
+      - { from: detail, css: "td[data-spec=make]" }
+      - { css: ".make" }
+  model:
+    candidates:
+      - { from: detail, jsonld: model, jsonldType: Car }
+      - { css: ".model" }
+  year:
+    candidates:
+      - { from: detail, jsonld: vehicleModelDate, jsonldType: Car }
+      - { css: ".year" }
+    transform: [integer]
+  price:
+    # Structured data first, then the visible drive-away price. The
+    # product:price:amount meta tag is deliberately NOT used: it holds the
+    # weekly repayment. Listing cards show "$189 per week" next to the price.
+    candidates:
+      - { from: detail, jsonld: offers.price, jsonldType: Car }
+      - { from: detail, css: ".price-driveaway" }
+      - { css: ".price span" }
+    reject:
+      - css: ".finance-repayment"
+      - contains: "per week"
+      - contains: "per month"
+      - max: 2000                  # nothing priced under $2,000 is a car price
+    prefer:
+      - contains: "drive away"
+    transform: [currency, decimal]
+  kilometres:
+    candidates:
+      - { from: detail, jsonld: mileageFromOdometer.value, jsonldType: Car }
+      - { css: ".odometer" }
+    transform: [number, integer]
+  batterySizeKwh:
+    candidates:
+      - { from: detail, css: "td[data-spec=battery]" }
+    transform:
+      - regex: '([\d.]+)\s*kWh'
+      - decimal
+  fuelType:
+    candidates:
+      - { from: detail, jsonld: fuelType, jsonldType: Car }
+      - { css: ".fuel" }
+    transform:
+      - map: { EV: electric, Electric: electric, Petrol: petrol, Hybrid: hybrid, Diesel: diesel }
+  location:
+    candidates:
+      - { css: ".location" }
+      - { from: detail, css: ".location" }
+    transform:
+      - replace: { from: "Located in ", to: "" }
+      - trim
+  url:
+    builtin: detailUrl
+
+notes:
+  - The server honours fuel but ignores minYear, so year filtering relies on query.filters.
+  - One detail page (volvo-ex30-2024) returns HTTP 500; listing values are used for it.
