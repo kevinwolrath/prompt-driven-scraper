@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kevinwolrath/prompt-driven-scraper/ai"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/demosite"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/engine"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/profile"
@@ -133,6 +134,7 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /api/ai/authoring-prompt", authoringPrompt)
 	mux.HandleFunc("GET /api/profiles", s.listProfiles)
 	mux.HandleFunc("POST /api/profiles", s.saveProfile)
 	mux.HandleFunc("POST /api/validate", s.validate)
@@ -147,6 +149,13 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/runs/{id}/records", s.records)
 	mux.HandleFunc("GET /api/runs/{id}/output", s.output)
 	return mux
+}
+
+// authoringPrompt serves the bootstrap prompt for AI assistants, built from
+// ai/PROFILE_AUTHORING.md, the schemas and the examples.
+func authoringPrompt(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	_, _ = io.WriteString(w, ai.BootstrapPrompt())
 }
 
 func (s *server) listProfiles(w http.ResponseWriter, r *http.Request) {

@@ -143,7 +143,14 @@ async function call<T>(method: string, path: string, body?: string): Promise<T> 
   return data as T;
 }
 
+async function text(path: string): Promise<string> {
+  const res = await fetch(path);
+  if (!res.ok) throw new ApiError(`${res.status} ${res.statusText}`);
+  return res.text();
+}
+
 export const api = {
+  authoringPrompt: () => text('/api/ai/authoring-prompt'),
   profiles: () => call<Profile[]>('GET', '/api/profiles'),
   saveProfile: (text: string) => call<{ profile: Profile; issues: Issue[] }>('POST', '/api/profiles', text),
   validate: (text: string) => call<ValidateResult>('POST', '/api/validate', text),

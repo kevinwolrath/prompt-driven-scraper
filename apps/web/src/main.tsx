@@ -326,6 +326,7 @@ function SessionView({ id, runId, onChanged }: { id: string; runId?: string; onC
         <RunView key={runId} runId={runId} sessionId={id} onStatusChange={() => { loadRuns(); onChanged(); }} />
       ) : (
         <>
+          <AiPromptPanel />
           <ImportPanel onImport={importConfig} disabled={false} />
           <ConfigPanels ed={ed} set={set} profiles={profiles} />
         </>
@@ -423,14 +424,104 @@ function RunsTable({ sessionId, runs, openRunId }: { sessionId: string; runs: Ru
   );
 }
 
+// AiPromptPanel gets an AI assistant into the right context. The prompt is
+// served by the API, which builds it from ai/PROFILE_AUTHORING.md, the schemas
+// and the examples, so the UI never holds its own copy.
+function AiPromptPanel() {
+  const [prompt, setPrompt] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    // Fetched up front so copying happens directly inside the click handler,
+    // which some browsers require for clipboard access.
+    api.authoringPrompt().then(setPrompt).catch((e) => setError(`Prompt unavailable: ${e.message}`));
+  }, []);
+
+  useEffect(() => {
+    const d = dialog.current;
+    if (!d) return;
+    if (open && !d.open) d.showModal();
+    if (!open && d.open) d.close();
+  }, [open]);
+
+  return (
+    <section className="panel ai-prompt">
+      <div>
+        <h2>Create configuration with AI</h2>
+        <p className="muted small">
+          Starting a new ChatGPT or Claude session? Copy the authoring prompt first. It teaches the AI the exact
+          configuration language this scraper supports. Then describe what you want to scrape and paste the
+          configuration it gives you below.
+        </p>
+        {error && <p className="small error-text">{error}</p>}
+      </div>
+      <div className="actions">
+        <CopyButton text={prompt} label="Copy AI authoring prompt" className="primary" />
+        <button onClick={() => setOpen(true)} disabled={!prompt}>View prompt</button>
+      </div>
+      <dialog ref={dialog} className="prompt-dialog" onClose={() => setOpen(false)}>
+        <div className="dialog-head">
+          <h2>AI authoring prompt</h2>
+          <div className="actions">
+            <CopyButton text={prompt} label="Copy" className="primary" />
+            <button onClick={() => setOpen(false)}>Close</button>
+          </div>
+        </div>
+        <p className="muted small">
+          Built from <code>ai/PROFILE_AUTHORING.md</code>, the JSON Schemas and the example configuration.
+        </p>
+        <pre className="prompt-text">{prompt}</pre>
+      </dialog>
+    </section>
+  );
+}
+
+function CopyButton({ text, label, className }: { text: string | null; label: string; className?: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (state === 'idle') return;
+    const t = setTimeout(() => setState('idle'), 2000);
+    return () => clearTimeout(t);
+  }, [state]);
+  const copy = async () => {
+    if (!text) return;
+    setState((await copyText(text)) ? 'copied' : 'failed');
+  };
+  return (
+    <button className={className} onClick={copy} disabled={!text} aria-live="polite">
+      {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : label}
+    </button>
+  );
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Clipboard API is unavailable on plain-HTTP origins other than localhost.
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+
 function ImportPanel({ onImport, disabled }: { onImport: (text: string) => void; disabled: boolean }) {
   const [text, setText] = useState('');
   return (
     <details className="panel import">
       <summary>Load AI-generated configuration</summary>
       <p className="muted small">
-        Paste a job or a single source profile (YAML or JSON) produced with <code>ai/PROFILE_AUTHORING.md</code>. It is
-        validated against the DSL; unsupported keys are rejected, not ignored.
+        Paste the job or source profile (YAML or JSON) your AI assistant produced. It is validated against the DSL;
+        unsupported keys are rejected, not ignored.
       </p>
       <textarea className="code" rows={10} value={text} onChange={(e) => setText(e.target.value)} disabled={disabled} />
       <button onClick={() => onImport(text)} disabled={disabled || !text.trim()}>Validate &amp; load</button>
@@ -622,7 +713,7 @@ function RunPanel({ job, sessionId, onUpdate, onStatusChange }: { job: Job; sess
           Fixed when the run started, with source profiles inline. Later edits to the session or its profiles do not
           change it. <a href={`#/sessions/${sessionId}`}>Edit the session's current configuration</a>
         </p>
-        <pre className="prompt-text">{JSON.stringify(job.definition, null, 2)}</pre>
+        <pre className="snapshot-json">{JSON.stringify(job.definition, null, 2)}</pre>
       </details>
     </section>
   );

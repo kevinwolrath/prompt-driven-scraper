@@ -72,14 +72,18 @@ machine contracts are [`schemas/`](schemas/).
 
 ### Using an AI assistant
 
-Give the assistant `ai/PROFILE_AUTHORING.md` and the schemas, then ask e.g.
+1. In a session, click **Copy AI authoring prompt** (or run `scraper prompt`, or
+   `GET /api/ai/authoring-prompt`).
+2. Paste it into a new ChatGPT or Claude session, then say what you want, e.g.
+   > Find suitable Australian vehicle sales sources for EVs from 2024 onwards and create the
+   > scraper configuration.
+3. Paste the configuration it returns into **Load AI-generated configuration**, then Save or Run
+   (or save it to a file and use `scraper validate` / `scraper run`).
 
-> Use the Prompt Driven Scraper instructions. Find suitable Australian vehicle sales sources for EVs
-> from 2024 onwards and create the scraper configuration.
-
-Paste the result into **Load AI-generated configuration** in the UI (or save it and run
-`scraper validate` / `scraper run`). Each accepted record carries field provenance, and each rejected record a
-reason, so profiles can be corrected quickly.
+The prompt is assembled by the Go `ai` package from `ai/BOOTSTRAP.md`,
+[`ai/PROFILE_AUTHORING.md`](ai/PROFILE_AUTHORING.md), the schemas and the examples, embedded at
+build time. Edit those files; nothing else holds a copy. Each accepted record carries field
+provenance and each rejected record a reason, so profiles can be corrected quickly.
 
 ## Sessions and runs
 
@@ -146,6 +150,7 @@ at a real total on the site. Accepted records stream as they are found.
 | `GET /api/runs/{id}/output` | The run's JSON/CSV output (completed or partial runs), available again at any time. |
 | `GET/POST /api/profiles` | List / add source profiles. |
 | `POST /api/validate` | Validate a job or profile without running it. |
+| `GET /api/ai/authoring-prompt` | The bootstrap prompt for AI assistants (Markdown). |
 
 ### CLI
 
@@ -153,6 +158,7 @@ at a real total on the site. Accepted records stream as they are found.
 scraper validate [-profiles dir] <job-or-profile.yaml>
 scraper run [-profiles dir] [-o file] [-demo-site] [-events] <job.yaml>
 scraper demo-site [-addr 127.0.0.1:8089] [-latency 0s]
+scraper prompt      # print the AI authoring prompt
 ```
 
 During `run`: Ctrl-C once = give me what you've got, twice = cancel; `p`/`r` + Enter = pause/resume.
@@ -180,7 +186,8 @@ schemas/        JSON Schemas for jobs and source profiles
 examples/       example job and source profiles
 migrations/     versioned SQL schema shared by SQLite and Cloudflare D1
 deploy/         Cloudflare D1 configuration
-ai/             PROFILE_AUTHORING.md — the manual given to AI assistants
+ai/             PROFILE_AUTHORING.md (the manual for AI assistants), BOOTSTRAP.md, and
+                the Go package that assembles them into the copyable prompt
 ```
 
 ## Persistence

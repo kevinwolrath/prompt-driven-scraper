@@ -68,7 +68,7 @@ button.wide { width: 100%; justify-content: center; }
 table.runs tr.selected td { background: var(--code); }
 .snapshot { margin-top: 18px; }
 .snapshot summary { cursor: pointer; font-weight: 600; }
-.prompt-text {
+.snapshot-json {
   max-height: 420px; overflow: auto; margin: 8px 0 0; padding: 12px; border-radius: 10px; background: var(--code);
   font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
 }
@@ -179,3 +179,21 @@ td { font-variant-numeric: tabular-nums; }
 .log .Warning b { color: var(--warn); }
 .log .Error b, .log .JobFailed b { color: var(--bad); }
 .log .RecordRejected b { color: var(--muted); }
+
+.ai-prompt { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 18px; }
+.ai-prompt h2 { margin-bottom: 4px; }
+.ai-prompt p { margin: 0; max-width: 72ch; }
+.error-text { color: var(--bad); }
+.prompt-dialog {
+  width: min(900px, calc(100% - 32px)); max-height: calc(100vh - 64px);
+  border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  background: var(--panel); color: var(--text);
+}
+.prompt-dialog[open] { display: flex; flex-direction: column; gap: 8px; }
+.prompt-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.dialog-head h2 { margin: 0; }
+.prompt-text {
+  flex: 1; overflow: auto; margin: 0; padding: 12px; border-radius: 10px; background: var(--code);
+  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+}
