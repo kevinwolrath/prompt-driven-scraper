@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kevinwolrath/prompt-driven-scraper/ai"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/demosite"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/engine"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/profile"
@@ -30,6 +31,7 @@ Usage:
   scraper validate [-profiles dir] <job-or-profile.yaml>
   scraper run [-profiles dir] [-o file] [-demo-site] [-events] <job.yaml>
   scraper demo-site [-addr 127.0.0.1:8089] [-latency 0s]
+  scraper prompt      print the AI authoring prompt to paste into ChatGPT/Claude
 
 Profiles referenced by profileRef are loaded from -profiles (default: the
 "sources" directory next to the job file).
@@ -53,6 +55,8 @@ func main() {
 		err = run(os.Args[2:])
 	case "demo-site":
 		err = demoSite(os.Args[2:])
+	case "prompt":
+		fmt.Print(ai.BootstrapPrompt())
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
