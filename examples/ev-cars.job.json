@@ -1,0 +1,49 @@
+{
+  "id": "ev-cars-2024-plus",
+  "name": "EV cars 2024+",
+  "queryInput": "I'm only looking for EV cars after 2024",
+  "query": {
+    "fuel": "electric",
+    "yearMin": 2024
+  },
+  "searchSources": [
+    {
+      "id": "example-cars",
+      "profile": {
+        "request": {
+          "startUrl": "https://example.invalid/cars",
+          "queryMap": {
+            "fuel": { "parameter": "fuel" },
+            "yearMin": { "parameter": "minYear" }
+          }
+        },
+        "pagination": {
+          "next": { "selector": "a.next", "attribute": "href" }
+        },
+        "records": {
+          "container": ".listing",
+          "detailUrl": { "selector": "a.details", "attribute": "href" }
+        },
+        "mapping": {
+          "make": { "selector": ".make" },
+          "model": { "selector": ".model" },
+          "year": { "selector": ".year", "transforms": ["integer"] },
+          "price": { "selector": ".price", "transforms": ["currency", "decimal"] },
+          "kilometres": { "selector": ".odometer", "transforms": ["integer"] },
+          "url": { "selector": "a.details", "attribute": "href" }
+        }
+      }
+    }
+  ],
+  "output": {
+    "format": "csv",
+    "fields": [
+      { "name": "make", "type": "string", "required": true },
+      { "name": "model", "type": "string", "required": true },
+      { "name": "year", "type": "integer" },
+      { "name": "price", "type": "decimal" },
+      { "name": "kilometres", "type": "integer" },
+      { "name": "url", "type": "url", "required": true }
+    ]
+  }
+}
