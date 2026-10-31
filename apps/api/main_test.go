@@ -43,7 +43,8 @@ func startAPI(t *testing.T, dbPath, demoURL string) (*httptest.Server, func()) {
 	if _, err := eng.Recover(ctx); err != nil {
 		t.Fatal(err)
 	}
-	srv := &server{store: store, engine: eng, sessions: session.New(store, eng)}
+	srv := &server{store: store, engine: eng, sessions: session.New(store, eng),
+		info: apiInfo{Features: apiFeatures, Store: storeconfig.SQLite, Database: dbPath}}
 	ts := httptest.NewServer(srv.routes())
 	return ts, func() {
 		eng.Shutdown(ctx)
@@ -95,6 +96,17 @@ func TestSessionRunFlowSurvivesRestart(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "data", "pds.db")
 	ts, stop := startAPI(t, dbPath, demo.URL)
 
+	var info apiInfo
+	if code := call(t, "GET", ts.URL+"/api/info", nil, &info); code != 200 || info.Store != "sqlite" || len(info.Features) == 0 {
+		t.Fatalf("info: %d %+v", code, info)
+	}
+	resp, _ := http.Get(ts.URL + "/api/ai/authoring-prompt")
+	prompt, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(prompt), "Prompt Driven Scraper — instructions for AI assistants") {
+		t.Fatal("authoring prompt does not contain ai/PROFILE_AUTHORING.md")
+	}
+
 	data, _ := os.ReadFile("../../examples/ev-cars.job.yaml")
 	def, _ := profile.DecodeJob(data)
 	var created struct {
@@ -116,7 +128,7 @@ func TestSessionRunFlowSurvivesRestart(t *testing.T) {
 	var run2 contracts.Job
 	call(t, "POST", ts.URL+"/api/sessions/"+id+"/runs", nil, &run2)
 	run2 = waitRun(t, ts.URL, run2.ID)
-	resp, _ := http.Get(ts.URL + "/api/runs/" + run1.ID + "/output")
+	resp, _ = http.Get(ts.URL + "/api/runs/" + run1.ID + "/output")
 	out1, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 
