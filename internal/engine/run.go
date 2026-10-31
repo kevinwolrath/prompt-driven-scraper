@@ -244,6 +244,7 @@ func (r *run) resume(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		r.ctrl = ctrlNone
+		r.job.StatusReason = ""
 		r.mu.Unlock()
 		if err := r.transition(contracts.EventJobResumed, contracts.JobRunning, "", map[string]any{"queued": len(st.Queue)}); err != nil {
 			return err
@@ -328,6 +329,16 @@ func (r *run) loadState(ctx context.Context) (*state, error) {
 	st := newState()
 	if err := json.Unmarshal(cp.State, st); err != nil {
 		return nil, fmt.Errorf("decode checkpoint: %w", err)
+	}
+	// Records accepted after the checkpoint (by a task interrupted part way
+	// through) are already stored; treat them as seen so a re-processed task
+	// reports them as duplicates instead of accepting them twice.
+	records, err := r.e.store.ListRecords(ctx, r.job.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, rec := range records {
+		st.Keys[rec.Key] = true
 	}
 	return st, nil
 }

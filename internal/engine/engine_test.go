@@ -47,10 +47,14 @@ func (h *harness) normalised(out contracts.Output) string {
 // in-process demo site.
 func newHarness(t *testing.T, latency time.Duration) *harness {
 	t.Helper()
+	return newHarnessWithStore(t, latency, storage.NewMemoryStore())
+}
+
+func newHarnessWithStore(t *testing.T, latency time.Duration, store storage.Store) *harness {
+	t.Helper()
 	srv := httptest.NewServer(demosite.Handler(demosite.Options{Latency: latency}))
 	t.Cleanup(srv.Close)
 
-	store := storage.NewMemoryStore()
 	profiles, errs := profile.LoadDir("../../examples/sources")
 	if len(errs) > 0 {
 		t.Fatal(errs)

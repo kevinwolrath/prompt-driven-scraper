@@ -61,6 +61,10 @@ func (t *Transform) UnmarshalJSON(data []byte) error {
 // ordered object of name -> type ("decimal?" marks an optional field).
 
 func (f *OutputFields) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		*f = nil
+		return nil
+	}
 	switch node.Kind {
 	case yaml.SequenceNode:
 		var list []FieldDefinition

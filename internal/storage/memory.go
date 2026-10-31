@@ -13,6 +13,7 @@ import (
 // local use. Documents are copied by value on the way in and out.
 type MemoryStore struct {
 	mu          sync.RWMutex
+	sessions    map[string]contracts.Session
 	jobs        map[string]contracts.Job
 	events      map[string][]contracts.Event
 	records     map[string][]contracts.Record
@@ -23,6 +24,7 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
+		sessions:    map[string]contracts.Session{},
 		jobs:        map[string]contracts.Job{},
 		events:      map[string][]contracts.Event{},
 		records:     map[string][]contracts.Record{},
@@ -34,6 +36,52 @@ func NewMemoryStore() *MemoryStore {
 
 var _ Store = (*MemoryStore)(nil)
 
+func (s *MemoryStore) CreateSession(_ context.Context, sess contracts.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess.ID == "" {
+		return errors.New("session id is required")
+	}
+	if _, exists := s.sessions[sess.ID]; exists {
+		return errors.New("session already exists")
+	}
+	s.sessions[sess.ID] = sess
+	return nil
+}
+
+func (s *MemoryStore) UpdateSession(_ context.Context, sess contracts.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, exists := s.sessions[sess.ID]
+	if !exists {
+		return ErrNotFound
+	}
+	sess.CreatedAt = old.CreatedAt
+	s.sessions[sess.ID] = sess
+	return nil
+}
+
+func (s *MemoryStore) GetSession(_ context.Context, id string) (contracts.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return contracts.Session{}, ErrNotFound
+	}
+	return sess, nil
+}
+
+func (s *MemoryStore) ListSessions(_ context.Context) ([]contracts.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]contracts.Session, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		out = append(out, sess)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].UpdatedAt.After(out[b].UpdatedAt) })
+	return out, nil
+}
+
 func (s *MemoryStore) CreateJob(_ context.Context, job contracts.Job) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -43,6 +91,16 @@ func (s *MemoryStore) CreateJob(_ context.Context, job contracts.Job) error {
 	if _, exists := s.jobs[job.ID]; exists {
 		return errors.New("job already exists")
 	}
+	if job.SessionID != "" {
+		if _, ok := s.sessions[job.SessionID]; !ok {
+			return errors.New("session does not exist")
+		}
+		for _, j := range s.jobs {
+			if j.SessionID == job.SessionID && j.RunNumber == job.RunNumber {
+				return errors.New("run number already used in this session")
+			}
+		}
+	}
 	s.jobs[job.ID] = job
 	return nil
 }
@@ -50,9 +108,14 @@ func (s *MemoryStore) CreateJob(_ context.Context, job contracts.Job) error {
 func (s *MemoryStore) UpdateJob(_ context.Context, job contracts.Job) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.jobs[job.ID]; !exists {
+	old, exists := s.jobs[job.ID]
+	if !exists {
 		return ErrNotFound
 	}
+	if old.Status.Terminal() {
+		return ErrImmutable
+	}
+	job.Definition, job.SessionID, job.RunNumber, job.CreatedAt = old.Definition, old.SessionID, old.RunNumber, old.CreatedAt
 	s.jobs[job.ID] = job
 	return nil
 }
@@ -75,6 +138,19 @@ func (s *MemoryStore) ListJobs(_ context.Context) ([]contracts.Job, error) {
 		out = append(out, j)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].CreatedAt.After(out[b].CreatedAt) })
+	return out, nil
+}
+
+func (s *MemoryStore) ListSessionJobs(_ context.Context, sessionID string) ([]contracts.Job, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []contracts.Job{}
+	for _, j := range s.jobs {
+		if j.SessionID == sessionID {
+			out = append(out, j)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].RunNumber > out[b].RunNumber })
 	return out, nil
 }
 
@@ -126,6 +202,9 @@ func (s *MemoryStore) GetCheckpoint(_ context.Context, jobID string) (contracts.
 func (s *MemoryStore) SaveOutput(_ context.Context, out contracts.Output) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.outputs[out.JobID]; exists {
+		return ErrImmutable
+	}
 	s.outputs[out.JobID] = out
 	return nil
 }

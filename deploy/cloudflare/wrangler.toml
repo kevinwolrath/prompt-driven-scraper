@@ -1,0 +1,17 @@
+# Cloudflare D1 database for hosted Prompt Driven Scraper persistence.
+#
+# Status: schema only. This creates the D1 database and applies the same
+# versioned migrations the local SQLite store uses (../../migrations).
+# There is no Worker/control-plane code yet and the Go runtime cannot use D1
+# yet; see "Hosted (Cloudflare D1)" in the README.
+#
+#   npx wrangler d1 create prompt-driven-scraper      # once; paste the id below
+#   npx wrangler d1 migrations apply prompt-driven-scraper --remote
+name = "prompt-driven-scraper"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "prompt-driven-scraper"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+migrations_dir = "../../migrations"

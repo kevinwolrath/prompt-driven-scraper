@@ -18,6 +18,9 @@ WORKDIR /app
 COPY --from=api /out/api /out/scraper /usr/local/bin/
 COPY --from=web /src/apps/web/dist ./web
 COPY examples ./examples
-ENV PDS_ADDR=:8080 PDS_PROFILES=/app/examples/sources PDS_WEB=/app/web
+ENV PDS_ADDR=:8080 PDS_PROFILES=/app/examples/sources PDS_WEB=/app/web \
+    PDS_STORE=sqlite PDS_DB=/data/prompt-driven-scraper.db
+# Sessions, runs and results live in the SQLite file; mount a volume to keep them.
+VOLUME /data
 EXPOSE 8080
 ENTRYPOINT ["api"]
