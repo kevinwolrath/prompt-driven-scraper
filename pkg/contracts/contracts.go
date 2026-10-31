@@ -266,8 +266,15 @@ type Progress struct {
 	Sources         []SourceProgress `json:"sources"`
 }
 
+// Job is one execution. In product terms it is a Run: when SessionID is set
+// it is run number RunNumber of that Session. Definition is the immutable
+// configuration snapshot the run used, with every source profile resolved
+// inline, so editing the Session or a stored profile later never changes
+// what a historical run reports.
 type Job struct {
 	ID         string        `json:"id"`
+	SessionID  string        `json:"sessionId,omitempty"`
+	RunNumber  int           `json:"runNumber,omitempty"`
 	Definition JobDefinition `json:"definition"`
 	Status     JobStatus     `json:"status"`
 	// StatusReason explains partial/failed/cancelled outcomes.
@@ -340,6 +347,54 @@ type Output struct {
 	RecordCount int       `json:"recordCount"`
 	Data        []byte    `json:"data"`
 	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// Session is a persistent scraping/search project: the user's current
+// configuration. Each execution of it is a Job (Run) referencing SessionID.
+// Definition may be an incomplete draft; it is validated when run.
+type Session struct {
+	ID         string        `json:"id"`
+	Name       string        `json:"name"`
+	Definition JobDefinition `json:"definition"`
+	CreatedAt  time.Time     `json:"createdAt"`
+	UpdatedAt  time.Time     `json:"updatedAt"`
+}
+
+// RunSummary is a light view of a run for lists; it omits the
+// configuration snapshot and per-source detail.
+type RunSummary struct {
+	ID              string     `json:"id"`
+	SessionID       string     `json:"sessionId,omitempty"`
+	RunNumber       int        `json:"runNumber"`
+	Status          JobStatus  `json:"status"`
+	StatusReason    string     `json:"statusReason,omitempty"`
+	RecordsAccepted int        `json:"recordsAccepted"`
+	Warnings        int        `json:"warnings"`
+	Errors          int        `json:"errors"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	StartedAt       *time.Time `json:"startedAt,omitempty"`
+	FinishedAt      *time.Time `json:"finishedAt,omitempty"`
+	RunningMs       int64      `json:"runningMs"`
+}
+
+// Summary returns the list view of a job.
+func (j Job) Summary() RunSummary {
+	return RunSummary{
+		ID: j.ID, SessionID: j.SessionID, RunNumber: j.RunNumber, Status: j.Status, StatusReason: j.StatusReason,
+		RecordsAccepted: j.Progress.RecordsAccepted, Warnings: j.Progress.Warnings, Errors: j.Progress.Errors,
+		CreatedAt: j.CreatedAt, StartedAt: j.StartedAt, FinishedAt: j.FinishedAt, RunningMs: j.RunningMs,
+	}
+}
+
+// SessionSummary is a light view of a session for the session list.
+type SessionSummary struct {
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	QueryInput string      `json:"queryInput,omitempty"`
+	CreatedAt  time.Time   `json:"createdAt"`
+	UpdatedAt  time.Time   `json:"updatedAt"`
+	RunCount   int         `json:"runCount"`
+	LastRun    *RunSummary `json:"lastRun,omitempty"`
 }
 
 // Checkpoint is the engine's resumable state for a job. State is opaque JSON

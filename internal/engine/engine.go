@@ -95,8 +95,20 @@ func (e *Engine) Prepare(ctx context.Context, def *contracts.JobDefinition) ([]*
 	return compiled, issues, nil
 }
 
+// RunMeta places a run within a Session. The zero value is an ad-hoc run.
+type RunMeta struct {
+	SessionID string
+	RunNumber int
+}
+
 // Submit validates a job, stores it as queued and starts it in the background.
 func (e *Engine) Submit(ctx context.Context, def contracts.JobDefinition) (contracts.Job, error) {
+	return e.SubmitRun(ctx, def, RunMeta{})
+}
+
+// SubmitRun is Submit for run number meta.RunNumber of a Session. The stored
+// definition is the resolved configuration snapshot for this run.
+func (e *Engine) SubmitRun(ctx context.Context, def contracts.JobDefinition, meta RunMeta) (contracts.Job, error) {
 	compiled, issues, err := e.Prepare(ctx, &def)
 	if err != nil {
 		return contracts.Job{}, err
@@ -104,6 +116,8 @@ func (e *Engine) Submit(ctx context.Context, def contracts.JobDefinition) (contr
 	now := e.opts.Now()
 	job := contracts.Job{
 		ID:         newID(now),
+		SessionID:  meta.SessionID,
+		RunNumber:  meta.RunNumber,
 		Definition: def,
 		Status:     contracts.JobQueued,
 		CreatedAt:  now,
@@ -181,14 +195,119 @@ func (e *Engine) Finalise(ctx context.Context, id string) (contracts.Job, error)
 }
 
 func (e *Engine) control(id string, fn func(*run) error) (contracts.Job, error) {
-	r := e.run(id)
-	if r == nil {
-		return contracts.Job{}, ErrNotFound
+	r, err := e.load(context.Background(), id)
+	if err != nil {
+		return contracts.Job{}, err
 	}
 	if err := fn(r); err != nil {
 		return r.snapshot(), err
 	}
 	return r.snapshot(), nil
+}
+
+// load returns the in-memory run for id, rebuilding it from the store when
+// this process did not start it (e.g. a run paused before a restart).
+func (e *Engine) load(ctx context.Context, id string) (*run, error) {
+	if r := e.run(id); r != nil {
+		return r, nil
+	}
+	job, err := e.store.GetJob(ctx, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if job.Status.Terminal() {
+		return nil, ErrInvalidAction
+	}
+	compiled, issues := profile.ValidateJob(job.Definition)
+	if issues.HasErrors() {
+		return nil, &ValidationError{Issues: issues}
+	}
+	events, err := e.store.ListEvents(ctx, id, 0)
+	if err != nil {
+		return nil, err
+	}
+	r := &run{e: e, job: job, profiles: compiled, wake: make(chan struct{}, 1)}
+	if len(events) > 0 {
+		r.seq = events[len(events)-1].Seq
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if existing := e.runs[id]; existing != nil {
+		return existing, nil
+	}
+	e.runs[id] = r
+	return r, nil
+}
+
+// Recover is called once at startup. Runs left running, pausing or
+// finalising by a process that stopped without a clean shutdown become
+// paused, so they can be resumed from their last checkpoint (or finalised
+// with "give me what you've got"). Runs that never started fail. It returns
+// the ids of the runs it changed.
+func (e *Engine) Recover(ctx context.Context) ([]string, error) {
+	jobs, err := e.store.ListJobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, job := range jobs {
+		if job.Status.Terminal() || job.Status == contracts.JobPaused || e.run(job.ID) != nil {
+			continue
+		}
+		r, err := e.load(ctx, job.ID)
+		if err != nil {
+			return changed, fmt.Errorf("recover run %s: %w", job.ID, err)
+		}
+		_, cpErr := e.store.GetCheckpoint(ctx, job.ID)
+		r.mu.Lock()
+		was := r.job.Status
+		if was == contracts.JobQueued || cpErr != nil {
+			if r.setStatus(contracts.JobFailed, "interrupted before it saved a checkpoint") == nil {
+				r.markSourcesLocked(contracts.SourceStopped)
+				r.emitLocked(contracts.EventJobFailed, "", r.job.StatusReason, nil, nil)
+			}
+		} else {
+			// Not a normal transition: the process that was running it is gone.
+			r.job.Status = contracts.JobPaused
+			r.job.StatusReason = fmt.Sprintf("interrupted while %s: the application stopped; resume continues from the last checkpoint", was)
+			r.emitLocked(contracts.EventJobPaused, "", r.job.StatusReason, map[string]any{"interrupted": true, "was": was}, nil)
+		}
+		r.mu.Unlock()
+		changed = append(changed, job.ID)
+	}
+	return changed, nil
+}
+
+// Shutdown pauses every running job at its next checkpoint and waits for
+// in-flight work to stop, so a restart can resume them. Finalising jobs are
+// allowed to finish.
+func (e *Engine) Shutdown(ctx context.Context) error {
+	e.mu.Lock()
+	runs := make([]*run, 0, len(e.runs))
+	for _, r := range e.runs {
+		runs = append(runs, r)
+	}
+	e.mu.Unlock()
+	for _, r := range runs {
+		_ = r.pause() // only valid while running
+	}
+	for _, r := range runs {
+		r.mu.Lock()
+		done := r.done
+		r.mu.Unlock()
+		if done == nil {
+			continue
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (e *Engine) run(id string) *run {

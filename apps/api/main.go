@@ -1,5 +1,5 @@
-// Command api exposes the deterministic engine over HTTP with a server-sent
-// events stream per job. It can also serve the built web UI and the bundled
+// Command api exposes Sessions and Runs of the deterministic engine over
+// HTTP, with a server-sent events stream per run. It can also serve the built web UI and the bundled
 // demo site, so one binary is enough for a local or containerised setup.
 package main
 
@@ -13,14 +13,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/kevinwolrath/prompt-driven-scraper/ai"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/demosite"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/engine"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/profile"
+	"github.com/kevinwolrath/prompt-driven-scraper/internal/session"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/storage"
+	"github.com/kevinwolrath/prompt-driven-scraper/internal/storage/storeconfig"
 	"github.com/kevinwolrath/prompt-driven-scraper/pkg/contracts"
 )
 
@@ -28,22 +32,27 @@ const maxBody = 2 << 20
 
 func main() {
 	addr := flag.String("addr", envOr("PDS_ADDR", ":8080"), "API listen address")
-	profilesDir := flag.String("profiles", envOr("PDS_PROFILES", "examples/sources"), "directory of source profiles to preload")
+	storeKind := flag.String("store", envOr("PDS_STORE", storeconfig.DefaultKind), "storage: sqlite (default, persistent), memory (ephemeral) or d1")
+	dbPath := flag.String("db", envOr("PDS_DB", storeconfig.DefaultSQLitePath), "SQLite database file (created if missing)")
+	profilesDir := flag.String("profiles", envOr("PDS_PROFILES", "examples/sources"), "directory of source profiles to add if not already stored")
 	webDir := flag.String("web", envOr("PDS_WEB", "apps/web/dist"), "built web UI to serve at / (ignored if missing)")
 	demoAddr := flag.String("demo-addr", envOr("PDS_DEMO_ADDR", "127.0.0.1:8089"), "serve the demo site here (empty to disable)")
 	demoLatency := flag.Duration("demo-latency", 250*time.Millisecond, "artificial demo site latency, so progress is visible")
 	flag.Parse()
 
-	store := storage.NewMemoryStore()
+	store, closeStore, err := storeconfig.Open(storeconfig.Config{Kind: *storeKind, SQLitePath: *dbPath})
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+	switch *storeKind {
+	case storeconfig.SQLite:
+		log.Printf("storage: sqlite at %s", *dbPath)
+	case storeconfig.Memory:
+		log.Printf("storage: memory (nothing is kept after this process exits)")
+	}
+	ctx := context.Background()
 	if *profilesDir != "" {
-		profiles, errs := profile.LoadDir(*profilesDir)
-		for _, e := range errs {
-			log.Println("skipped profile:", e)
-		}
-		for _, p := range profiles {
-			_ = store.SaveProfile(context.Background(), p)
-		}
-		log.Printf("loaded %d source profiles from %s", len(profiles), *profilesDir)
+		seedProfiles(ctx, store, *profilesDir)
 	}
 	if *demoAddr != "" {
 		go func() {
@@ -54,19 +63,70 @@ func main() {
 		}()
 	}
 
-	srv := &server{store: store, engine: engine.New(store, engine.Options{})}
+	eng := engine.New(store, engine.Options{})
+	recovered, err := eng.Recover(ctx)
+	if err != nil {
+		log.Fatalf("recover runs: %v", err)
+	}
+	for _, id := range recovered {
+		log.Printf("run %s was interrupted by the previous shutdown; it is now paused (or failed if it had no checkpoint)", id)
+	}
+
+	srv := &server{store: store, engine: eng, sessions: session.New(store, eng)}
 	mux := srv.routes()
 	if st, err := os.Stat(*webDir); err == nil && st.IsDir() {
 		mux.Handle("GET /", spa(*webDir))
 		log.Printf("serving web UI from %s", *webDir)
 	}
-	log.Printf("prompt-driven-scraper API listening on %s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, cors(mux)))
+	httpSrv := &http.Server{Addr: *addr, Handler: cors(mux)}
+	go func() {
+		log.Printf("prompt-driven-scraper API listening on %s", *addr)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	}()
+
+	// On Ctrl-C / SIGTERM, pause running jobs at a checkpoint so they can be
+	// resumed after the next start, then close the database cleanly.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+	log.Println("shutting down: pausing running jobs")
+	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := eng.Shutdown(shutdownCtx); err != nil {
+		log.Println("shutdown:", err)
+	}
+	_ = httpSrv.Close() // also ends open event streams
+	if err := closeStore(); err != nil {
+		log.Println("close storage:", err)
+	}
+}
+
+// seedProfiles adds bundled profiles that are not stored yet. Profiles the
+// user has saved or edited are never overwritten.
+func seedProfiles(ctx context.Context, store storage.Store, dir string) {
+	profiles, errs := profile.LoadDir(dir)
+	for _, e := range errs {
+		log.Println("skipped profile:", e)
+	}
+	added := 0
+	for _, p := range profiles {
+		if _, err := store.GetProfile(ctx, p.ID); err == nil {
+			continue
+		}
+		if err := store.SaveProfile(ctx, p); err != nil {
+			log.Fatalf("save profile %s: %v", p.ID, err)
+		}
+		added++
+	}
+	log.Printf("source profiles: %d bundled in %s, %d newly added", len(profiles), dir, added)
 }
 
 type server struct {
-	store  storage.Store
-	engine *engine.Engine
+	store    storage.Store
+	engine   *engine.Engine
+	sessions *session.Service
 }
 
 func (s *server) routes() *http.ServeMux {
@@ -78,13 +138,16 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/profiles", s.listProfiles)
 	mux.HandleFunc("POST /api/profiles", s.saveProfile)
 	mux.HandleFunc("POST /api/validate", s.validate)
-	mux.HandleFunc("GET /api/jobs", s.listJobs)
-	mux.HandleFunc("POST /api/jobs", s.createJob)
-	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
-	mux.HandleFunc("POST /api/jobs/{id}/{action}", s.controlJob)
-	mux.HandleFunc("GET /api/jobs/{id}/events", s.events)
-	mux.HandleFunc("GET /api/jobs/{id}/records", s.records)
-	mux.HandleFunc("GET /api/jobs/{id}/output", s.output)
+	mux.HandleFunc("GET /api/sessions", s.listSessions)
+	mux.HandleFunc("POST /api/sessions", s.createSession)
+	mux.HandleFunc("GET /api/sessions/{id}", s.getSession)
+	mux.HandleFunc("PUT /api/sessions/{id}", s.updateSession)
+	mux.HandleFunc("POST /api/sessions/{id}/runs", s.runSession)
+	mux.HandleFunc("GET /api/runs/{id}", s.getJob)
+	mux.HandleFunc("POST /api/runs/{id}/{action}", s.controlJob)
+	mux.HandleFunc("GET /api/runs/{id}/events", s.events)
+	mux.HandleFunc("GET /api/runs/{id}/records", s.records)
+	mux.HandleFunc("GET /api/runs/{id}/output", s.output)
 	return mux
 }
 
@@ -155,37 +218,96 @@ func (s *server) validate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"kind": "profile", "valid": !issues.HasErrors(), "profile": p, "issues": nonNil(issues)})
 }
 
-func (s *server) listJobs(w http.ResponseWriter, r *http.Request) {
-	jobs, err := s.engine.List(r.Context())
+// sessionInput is the body of POST/PUT /api/sessions: a name and the
+// session's current configuration (decoded strictly, YAML or JSON).
+type sessionInput struct {
+	Name       string                  `yaml:"name"`
+	Definition contracts.JobDefinition `yaml:"definition"`
+}
+
+func (s *server) readSession(w http.ResponseWriter, r *http.Request) (sessionInput, bool) {
+	var in sessionInput
+	body, err := readBody(r)
+	if err == nil {
+		err = profile.Decode(body, &in)
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return in, false
+	}
+	return in, true
+}
+
+func (s *server) listSessions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.sessions.List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, jobs)
+	writeJSON(w, http.StatusOK, list)
 }
 
-func (s *server) createJob(w http.ResponseWriter, r *http.Request) {
-	body, err := readBody(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+func (s *server) createSession(w http.ResponseWriter, r *http.Request) {
+	in, ok := s.readSession(w, r)
+	if !ok {
 		return
 	}
-	def, err := profile.DecodeJob(body)
+	sess, issues, err := s.sessions.Create(r.Context(), in.Name, in.Definition)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	job, err := s.engine.Submit(r.Context(), def)
+	writeJSON(w, http.StatusCreated, map[string]any{"session": sess, "issues": issues})
+}
+
+func (s *server) getSession(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.sessions.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeSessionError(w, err)
+		return
+	}
+	runs, err := s.sessions.Runs(r.Context(), sess.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": sess, "runs": runs, "issues": s.sessions.Validate(r.Context(), sess.Definition)})
+}
+
+func (s *server) updateSession(w http.ResponseWriter, r *http.Request) {
+	in, ok := s.readSession(w, r)
+	if !ok {
+		return
+	}
+	sess, issues, err := s.sessions.Update(r.Context(), r.PathValue("id"), in.Name, in.Definition)
+	if err != nil {
+		writeSessionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": sess, "issues": issues})
+}
+
+// runSession starts a new run of the session's saved configuration.
+func (s *server) runSession(w http.ResponseWriter, r *http.Request) {
+	job, err := s.sessions.Run(r.Context(), r.PathValue("id"))
 	if err != nil {
 		var ve *engine.ValidationError
 		if errors.As(err, &ve) {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid job", "issues": ve.Issues})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "the session configuration is invalid", "issues": ve.Issues})
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		writeSessionError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, job)
+}
+
+func writeSessionError(w http.ResponseWriter, err error) {
+	if errors.Is(err, session.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, err)
 }
 
 func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
@@ -369,7 +491,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
