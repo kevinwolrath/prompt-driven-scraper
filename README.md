@@ -26,6 +26,21 @@ go run ./apps/api        # http://localhost:8080, data in data/prompt-driven-scr
 
 For UI development run `go run ./apps/api` and `cd apps/web && npm run dev` (Vite proxies `/api`).
 
+**Seeing an old UI or a "the API … is an older build" banner?** Vite reloads the UI from your
+checkout, but the Go API keeps running whatever code it started with. After pulling, update and
+restart both:
+
+```bash
+git checkout develop && git pull
+```
+
+```bash
+go run ./apps/api        # stop the old one first (Ctrl-C)
+```
+
+The UI checks `GET /api/info` on load and shows which storage the API uses (bottom of the session
+list).
+
 ```bash
 # Docker
 docker build -t prompt-driven-scraper . && docker run -p 8080:8080 prompt-driven-scraper
@@ -150,6 +165,7 @@ at a real total on the site. Accepted records stream as they are found.
 | `GET /api/runs/{id}/output` | The run's JSON/CSV output (completed or partial runs), available again at any time. |
 | `GET/POST /api/profiles` | List / add source profiles. |
 | `POST /api/validate` | Validate a job or profile without running it. |
+| `GET /api/info` | API features and storage in use (the UI uses it to detect an outdated API). |
 | `GET /api/ai/authoring-prompt` | The bootstrap prompt for AI assistants (Markdown). |
 
 ### CLI

@@ -72,7 +72,11 @@ func main() {
 		log.Printf("run %s was interrupted by the previous shutdown; it is now paused (or failed if it had no checkpoint)", id)
 	}
 
-	srv := &server{store: store, engine: eng, sessions: session.New(store, eng)}
+	info := apiInfo{Features: apiFeatures, Store: *storeKind}
+	if *storeKind == storeconfig.SQLite {
+		info.Database = *dbPath
+	}
+	srv := &server{store: store, engine: eng, sessions: session.New(store, eng), info: info}
 	mux := srv.routes()
 	if st, err := os.Stat(*webDir); err == nil && st.IsDir() {
 		mux.Handle("GET /", spa(*webDir))
@@ -127,12 +131,26 @@ type server struct {
 	store    storage.Store
 	engine   *engine.Engine
 	sessions *session.Service
+	info     apiInfo
+}
+
+// apiFeatures lets the UI detect an API build that is older than itself
+// (for example a long-running `go run ./apps/api` started before a pull).
+var apiFeatures = []string{"sessions", "runs", "ai-authoring-prompt"}
+
+type apiInfo struct {
+	Features []string `json:"features"`
+	Store    string   `json:"store"`
+	Database string   `json:"database,omitempty"`
 }
 
 func (s *server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, s.info)
 	})
 	mux.HandleFunc("GET /api/ai/authoring-prompt", authoringPrompt)
 	mux.HandleFunc("GET /api/profiles", s.listProfiles)

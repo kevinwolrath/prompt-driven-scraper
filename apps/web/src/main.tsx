@@ -2,13 +2,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import {
-  api, ApiError, Definition, Issue, Job, JobEvent, Profile, Progress, Record_, RunSummary, Session, SessionSummary,
+  api, ApiError, ApiInfo, Definition, Issue, Job, JobEvent, Profile, Progress, Record_, RunSummary, Session, SessionSummary,
   SourceProgress, terminal,
 } from './api';
 
-// A new session starts from the bundled demo configuration so it can run
-// immediately; everything is editable.
-const DEFAULT_DEFINITION: Definition = {
+// New sessions start empty: configuration normally comes from an AI session
+// (Create configuration with AI -> Load AI-generated configuration).
+const EMPTY_DEFINITION: Definition = {
+  queryInput: '',
+  query: {},
+  searchSources: [],
+  output: { format: 'csv', fields: [] },
+};
+
+// The bundled demo configuration, offered on empty sessions.
+const DEMO_DEFINITION: Definition = {
   queryInput: "I'm only looking for EV cars after 2024",
   query: {
     params: { fuel: 'electric', yearMin: 2024 },
@@ -77,16 +85,42 @@ function useRoute(): Route {
 function App() {
   const route = useRoute();
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
+  const [info, setInfo] = useState<ApiInfo | null>(null);
+  const [apiProblem, setApiProblem] = useState('');
   const [error, setError] = useState('');
 
   const refresh = useCallback(() => {
-    api.sessions().then(setSessions).catch((e) => setError(`Cannot reach the API: ${e.message}`));
+    api.sessions().then(setSessions).catch((e) => setError(e.message));
   }, []);
-  useEffect(refresh, [refresh]);
+
+  useEffect(() => {
+    // Check the API first so an old or missing API is explained, not shown
+    // as a generic error (Vite reloads the UI; the Go API must be restarted).
+    api.info()
+      .then((i) => {
+        if (!i.features?.includes('sessions')) throw new ApiError('Not Found');
+        setInfo(i);
+        refresh();
+      })
+      .catch((e: Error) =>
+        setApiProblem(
+          e.message === 'Not Found'
+            ? 'The API answering on /api is an older build without Sessions. Stop it and start the current one from the repository root: go run ./apps/api'
+            : `Cannot reach the API (${e.message}). Start it from the repository root: go run ./apps/api`,
+        ),
+      );
+  }, [refresh]);
+
+  // With no session selected, open the most recently used one.
+  useEffect(() => {
+    if (!route.sessionId && sessions && sessions.length > 0) {
+      window.location.replace(`#/sessions/${sessions[0].id}`);
+    }
+  }, [route.sessionId, sessions]);
 
   const newSession = async () => {
     try {
-      const { session } = await api.createSession('New session', DEFAULT_DEFINITION);
+      const { session } = await api.createSession('New session', EMPTY_DEFINITION);
       refresh();
       go(session.id);
     } catch (e) {
@@ -98,9 +132,9 @@ function App() {
     <div className="layout">
       <aside className="sidebar">
         <p className="eyebrow">Prompt Driven Scraper</p>
-        <button className="primary wide" onClick={newSession}>+ New Session</button>
+        <button className="primary wide" onClick={newSession} disabled={!info}>+ New Session</button>
         <h3>Sessions</h3>
-        {sessions === null && !error && <p className="muted small">Loading…</p>}
+        {sessions === null && !apiProblem && <p className="muted small">Loading…</p>}
         {sessions?.length === 0 && <p className="muted small">No sessions yet.</p>}
         <ul className="session-list">
           {sessions?.map((s) => (
@@ -120,24 +154,40 @@ function App() {
             </li>
           ))}
         </ul>
+        {info && (
+          <p className={`storage small ${info.store === 'memory' ? 'warn' : 'muted'}`}>
+            {info.store === 'sqlite'
+              ? <>Saved in SQLite: <code>{info.database}</code></>
+              : info.store === 'memory'
+                ? 'In-memory storage: sessions are lost when the API stops.'
+                : `Storage: ${info.store}`}
+          </p>
+        )}
       </aside>
 
       <main className="shell">
+        {apiProblem && <p className="banner">{apiProblem}</p>}
         {error && <p className="notice">{error}</p>}
         {route.sessionId ? (
           <SessionView key={route.sessionId} id={route.sessionId} runId={route.runId} onChanged={refresh} />
         ) : (
-          <header>
-            <h1>Deterministic scraping, profile driven.</h1>
-            <p className="lede">
-              AI assistants write the configuration. The runtime never calls one: same configuration, same content,
-              same results. Sessions and their runs are saved, so you can come back to them later.
-            </p>
-            <p>
-              <button className="primary" onClick={newSession}>+ New Session</button>
-              {sessions && sessions.length > 0 && <span className="muted"> or open one from the list.</span>}
-            </p>
-          </header>
+          sessions?.length === 0 && (
+            <header>
+              <h1>Deterministic scraping, profile driven.</h1>
+              <p className="lede">
+                AI assistants write the configuration. The runtime never calls one: same configuration, same content,
+                same results. Sessions and their runs are saved, so you can come back to them later.
+              </p>
+              <ol className="workflow">
+                <li>Create a session</li>
+                <li>Copy the AI authoring prompt into ChatGPT or Claude and describe what to scrape</li>
+                <li>Load the configuration it produces</li>
+                <li>Check Query, Search Sources and Output, then Run</li>
+                <li>Come back to previous runs at any time</li>
+              </ol>
+              <button className="primary" onClick={newSession} disabled={!info}>+ New Session</button>
+            </header>
+          )
         )}
       </main>
     </div>
@@ -313,14 +363,18 @@ function SessionView({ id, runId, onChanged }: { id: string; runId?: string; onC
         />
         <div className="actions">
           <span className="muted small">{dirty ? 'Unsaved changes' : 'Saved'}</span>
-          <button onClick={save} disabled={!dirty || busy}>Save</button>
-          <button className="primary" onClick={run} disabled={busy || ed.selected.length === 0}>
-            {runs.length ? 'Run again' : 'Run'}
-          </button>
+          {runId ? (
+            <>
+              <a className="button" href={`#/sessions/${id}`}>Edit configuration</a>
+              <button className="primary" onClick={run} disabled={busy || ed.selected.length === 0}>Run again</button>
+            </>
+          ) : (
+            dirty && <button onClick={save} disabled={busy}>Save</button>
+          )}
         </div>
       </div>
       {notice && <p className="notice">{notice}</p>}
-      {issues.some((i) => i.severity === 'error') && <Issues issues={issues} />}
+      {issues.some((i) => i.severity === 'error') && !isEmpty(ed) && <Issues issues={issues} />}
 
       {runId ? (
         <RunView key={runId} runId={runId} sessionId={id} onStatusChange={() => { loadRuns(); onChanged(); }} />
@@ -328,13 +382,34 @@ function SessionView({ id, runId, onChanged }: { id: string; runId?: string; onC
         <>
           <AiPromptPanel />
           <ImportPanel onImport={importConfig} disabled={false} />
+          {isEmpty(ed) && (
+            <p className="muted small demo-hint">
+              This session is empty. Load a configuration above, fill in the panels below, or{' '}
+              <button className="link" onClick={() => setEd({ ...toEditor({ id, name: ed.name, definition: DEMO_DEFINITION, createdAt: '', updatedAt: '' }) })}>
+                use the bundled demo example
+              </button>
+              .
+            </p>
+          )}
           <ConfigPanels ed={ed} set={set} profiles={profiles} />
+          <div className="runbar">
+            <button className="primary" onClick={run} disabled={busy || ed.selected.length === 0}
+              title={ed.selected.length === 0 ? 'Select at least one search source' : 'Save and start a new run'}>
+              <span className="step light">4</span>{runs.length ? 'Run again' : 'Run'}
+            </button>
+            <button onClick={save} disabled={!dirty || busy}>Save without running</button>
+            {ed.selected.length === 0 && <span className="muted small">Select at least one search source to run.</span>}
+          </div>
         </>
       )}
 
       <RunsTable sessionId={id} runs={runs} openRunId={runId} />
     </>
   );
+}
+
+function isEmpty(e: Editor) {
+  return !e.queryInput && e.selected.length === 0 && (e.outputText === '{}' || !e.outputText.trim());
 }
 
 function ConfigPanels({ ed, set, profiles }: { ed: Editor; set: (p: Partial<Editor>) => void; profiles: Profile[] }) {
@@ -395,7 +470,7 @@ function RunsTable({ sessionId, runs, openRunId }: { sessionId: string; runs: Ru
   return (
     <section className="panel">
       <div className="run-head">
-        <h2>Runs</h2>
+        <h2>Previous runs</h2>
         {openRunId && <a href={`#/sessions/${sessionId}`}>Edit configuration</a>}
       </div>
       {runs.length === 0 ? (

@@ -149,7 +149,10 @@ async function text(path: string): Promise<string> {
   return res.text();
 }
 
+export interface ApiInfo { features: string[]; store: string; database?: string }
+
 export const api = {
+  info: () => call<ApiInfo>('GET', '/api/info'),
   authoringPrompt: () => text('/api/ai/authoring-prompt'),
   profiles: () => call<Profile[]>('GET', '/api/profiles'),
   saveProfile: (text: string) => call<{ profile: Profile; issues: Issue[] }>('POST', '/api/profiles', text),
