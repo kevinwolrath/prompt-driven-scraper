@@ -1,0 +1,35 @@
+# Source profile for the bundled Demo Motors JSON API (EVs only).
+id: demo-ev-api
+name: Demo Motors EV API (JSON)
+format: json
+
+request:
+  url: http://127.0.0.1:8089/demo/api/evs
+
+limits:
+  maxPages: 10
+  delayMs: 150
+
+pagination:
+  next: { from: listing, json: next }
+  totalResults: { from: listing, json: total }
+  pageSize: 5
+
+listing:
+  items: results
+
+fields:
+  make:      { json: vehicle.make }
+  model:     { json: vehicle.model }
+  year:      { json: vehicle.year, transform: [integer] }
+  price:
+    # pricing holds both a weekly repayment and the drive-away price.
+    json: "pricing[type=driveaway].amount"
+    transform: [decimal]
+  kilometres: { json: vehicle.odometer.value, transform: [integer] }
+  batterySizeKwh: { json: vehicle.battery.capacityKwh, transform: [decimal] }
+  fuelType:  { const: electric }
+  location:  { json: location }
+  url:
+    json: href
+    transform: [absoluteUrl]

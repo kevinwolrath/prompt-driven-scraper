@@ -1,0 +1,32 @@
+# Example job: EVs from 2024 onwards across both demo sources.
+# Run: go run ./apps/cli run --demo-site examples/ev-cars.job.yaml
+id: ev-cars-2024-plus
+name: EV cars 2024+
+queryInput: "I'm only looking for EV cars after 2024"
+
+query:
+  params:
+    fuel: electric
+    yearMin: 2024
+  filters:
+    - { field: fuelType, op: eq, value: electric }
+    - { field: year, op: gte, value: 2024 }
+
+searchSources:
+  - id: demo-motors
+    profileRef: demo-motors
+  - id: demo-ev-api
+    profileRef: demo-ev-api
+
+output:
+  format: csv
+  fields:
+    make: string
+    model: string
+    year: integer
+    price: decimal
+    kilometres: integer
+    batterySizeKwh: decimal?
+    fuelType: string
+    location: string?
+    url: url
