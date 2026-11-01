@@ -100,6 +100,44 @@ The prompt is assembled by the Go `ai` package from `ai/BOOTSTRAP.md`,
 build time. Edit those files; nothing else holds a copy. Each accepted record carries field
 provenance and each rejected record a reason, so profiles can be corrected quickly.
 
+## Acquisition: HTTP with browser fallback
+
+Each source runs three separate stages, and the run view reports each one:
+
+```text
+Acquisition  obtain the page: HTTP, then optionally a headless browser
+Extraction   the profile's listing and field rules, identical whatever acquired the page
+Filtering    query.filters, type coercion and dedupe
+```
+
+A profile lists its acquisition strategies in order:
+
+```yaml
+acquisition:
+  strategies:
+    - type: http
+    - type: browser
+      waitUntil: domcontentloaded      # or load (default)
+      waitFor: "article.listing-card"  # wait for listing items before reading the DOM
+      timeoutSeconds: 45
+```
+
+- **When a fallback runs:** only when a strategy fails with HTTP 401, 403 or 429, or returns a
+  recognised bot-challenge/access-denied page. A 404, 500 or network error fails without a
+  fallback. After a fallback works, the rest of the source's pages start with that strategy.
+- **What is recorded:** every attempt is an `AcquisitionAttempt` event: strategy, URL, result,
+  HTTP status, duration, final URL and title. Sources track pages attempted vs loaded (several
+  attempts at one URL count as one page), per-strategy attempt counts, and a failure stage and
+  reason.
+- **Browser setup:** the browser strategy needs Chrome or Chromium. It is found on the PATH or
+  in the usual install locations. Otherwise set `PDS_BROWSER_PATH` to its executable.
+  `PDS_BROWSER_HEADED=1` shows the window, which is useful to watch a load locally. One browser
+  process starts on first use, each page gets its own tab, and it closes on shutdown.
+- **Not an evasion tool:** the browser is a normal headless Chrome with no fingerprint spoofing.
+  Interactive challenges (CAPTCHA, "verify you are human") are reported as acquisition
+  failures. The demo source `demo-protected` refuses plain HTTP and renders listings with
+  JavaScript, so you can see the fallback work.
+
 ## Sessions and runs
 
 A **Session** is a saved scraping project: a name plus its current Query Input, Search Sources and
@@ -299,7 +337,9 @@ Until then `-store d1` fails at startup instead of pretending.
 
 ## Current limitations
 
-- HTTP GET only; no JavaScript rendering, POST bodies, cookies/login.
+- No POST bodies, cookies/login, clicking or scrolling. JavaScript rendering is available through
+  the `browser` acquisition strategy.
+- Interactive bot challenges (CAPTCHA, "verify you are human") are reported, not solved.
 - No robots.txt handling yet; profiles set politeness via `limits.delayMs`.
 - Sources run sequentially and each source fetches one page at a time (deterministic and polite).
 - No date output type yet.

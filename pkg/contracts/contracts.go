@@ -99,14 +99,16 @@ type SourceProfile struct {
 	Name        string `json:"name,omitempty" yaml:"name,omitempty"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	// Format of fetched documents: "html" (default) or "json".
-	Format     string               `json:"format,omitempty" yaml:"format,omitempty"`
-	Request    RequestSpec          `json:"request" yaml:"request"`
-	Limits     Limits               `json:"limits,omitempty" yaml:"limits,omitempty"`
-	Pagination *Pagination          `json:"pagination,omitempty" yaml:"pagination,omitempty"`
-	Listing    Listing              `json:"listing" yaml:"listing"`
-	Ignore     []string             `json:"ignore,omitempty" yaml:"ignore,omitempty"`
-	Fields     map[string]FieldRule `json:"fields" yaml:"fields"`
-	Notes      []string             `json:"notes,omitempty" yaml:"notes,omitempty"`
+	Format  string      `json:"format,omitempty" yaml:"format,omitempty"`
+	Request RequestSpec `json:"request" yaml:"request"`
+	// Acquisition says how pages are obtained. Omitted means plain HTTP.
+	Acquisition *Acquisition         `json:"acquisition,omitempty" yaml:"acquisition,omitempty"`
+	Limits      Limits               `json:"limits,omitempty" yaml:"limits,omitempty"`
+	Pagination  *Pagination          `json:"pagination,omitempty" yaml:"pagination,omitempty"`
+	Listing     Listing              `json:"listing" yaml:"listing"`
+	Ignore      []string             `json:"ignore,omitempty" yaml:"ignore,omitempty"`
+	Fields      map[string]FieldRule `json:"fields" yaml:"fields"`
+	Notes       []string             `json:"notes,omitempty" yaml:"notes,omitempty"`
 }
 
 type RequestSpec struct {
@@ -124,6 +126,26 @@ type ParamMapping struct {
 	// Unmapped controls what happens when From has a value missing from Map:
 	// "omit" (default, a warning is emitted), "pass" (send as-is) or "fail".
 	Unmapped string `json:"unmapped,omitempty" yaml:"unmapped,omitempty"`
+}
+
+// Acquisition lists the strategies used to obtain a page, in order. Each
+// later strategy is a fallback, used only when the previous one failed in a
+// way a different strategy might fix: HTTP 401, 403 or 429, or a bot
+// challenge page. Whatever strategy succeeds, the page goes through the same
+// extraction rules.
+type Acquisition struct {
+	Strategies []AcquisitionStrategy `json:"strategies" yaml:"strategies"`
+}
+
+type AcquisitionStrategy struct {
+	// Type is "http" (plain GET) or "browser" (headless Chrome/Chromium).
+	Type string `json:"type" yaml:"type"`
+	// WaitUntil (browser): "load" (default) or "domcontentloaded".
+	WaitUntil string `json:"waitUntil,omitempty" yaml:"waitUntil,omitempty"`
+	// WaitFor (browser): CSS selector to wait for on listing pages before
+	// reading the DOM, typically the listing.items selector.
+	WaitFor  string `json:"waitFor,omitempty" yaml:"waitFor,omitempty"`
+	TimeoutS int    `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
 type Limits struct {
@@ -233,12 +255,34 @@ const (
 	SourceFailed    SourceStatus = "failed"
 )
 
+// AcquisitionStats counts attempts of one acquisition strategy for a source.
+type AcquisitionStats struct {
+	Strategy  string `json:"strategy"`
+	Attempts  int    `json:"attempts"`
+	Succeeded int    `json:"succeeded"`
+	Failed    int    `json:"failed"`
+	// LastResult is a short description of the latest attempt, e.g.
+	// "HTTP 403 Forbidden", "page loaded", "bot challenge detected".
+	LastResult string `json:"lastResult,omitempty"`
+}
+
+// Failure stages for SourceProgress.FailureStage.
+const (
+	StageAcquisition = "acquisition"
+	StageExtraction  = "extraction"
+)
+
 type SourceProgress struct {
-	ID              string       `json:"id"`
-	Name            string       `json:"name,omitempty"`
-	Status          SourceStatus `json:"status"`
-	PagesVisited    int          `json:"pagesVisited"`
-	PagesDiscovered int          `json:"pagesDiscovered"`
+	ID     string       `json:"id"`
+	Name   string       `json:"name,omitempty"`
+	Status SourceStatus `json:"status"`
+	// PagesAttempted counts logical pages (URLs) the source tried to obtain;
+	// PagesVisited counts those that were obtained, by any strategy. Several
+	// acquisition attempts for one URL count as one page.
+	PagesAttempted  int `json:"pagesAttempted"`
+	PagesVisited    int `json:"pagesVisited"`
+	PagesFailed     int `json:"pagesFailed"`
+	PagesDiscovered int `json:"pagesDiscovered"`
 	// ListingPagesTotal is only set when the source exposes a real total.
 	ListingPagesTotal   int `json:"listingPagesTotal,omitempty"`
 	ListingPagesVisited int `json:"listingPagesVisited"`
@@ -248,12 +292,18 @@ type SourceProgress struct {
 	Duplicates          int `json:"duplicates"`
 	Warnings            int `json:"warnings"`
 	Errors              int `json:"errors"`
+	// Acquisition has one entry per configured strategy, in order.
+	Acquisition []AcquisitionStats `json:"acquisition,omitempty"`
+	// FailureStage and FailureReason explain a failed source.
+	FailureStage  string `json:"failureStage,omitempty"`
+	FailureReason string `json:"failureReason,omitempty"`
 }
 
 type Progress struct {
 	CurrentSource   string           `json:"currentSource,omitempty"`
 	SourcesTotal    int              `json:"sourcesTotal"`
 	SourcesComplete int              `json:"sourcesComplete"`
+	PagesAttempted  int              `json:"pagesAttempted"`
 	PagesVisited    int              `json:"pagesVisited"`
 	PagesDiscovered int              `json:"pagesDiscovered"`
 	RecordsFound    int              `json:"recordsFound"`
@@ -291,24 +341,26 @@ type Job struct {
 type EventType string
 
 const (
-	EventJobStarted      EventType = "JobStarted"
-	EventSourceStarted   EventType = "SourceStarted"
-	EventPageDiscovered  EventType = "PageDiscovered"
-	EventPageFetched     EventType = "PageFetched"
-	EventRecordFound     EventType = "RecordFound"
-	EventRecordAccepted  EventType = "RecordAccepted"
-	EventRecordRejected  EventType = "RecordRejected"
-	EventWarning         EventType = "Warning"
-	EventError           EventType = "Error"
-	EventSourceCompleted EventType = "SourceCompleted"
-	EventJobPausing      EventType = "JobPausing"
-	EventJobPaused       EventType = "JobPaused"
-	EventJobResumed      EventType = "JobResumed"
-	EventJobFinalising   EventType = "JobFinalising"
-	EventJobCompleted    EventType = "JobCompleted"
-	EventJobPartial      EventType = "JobPartial"
-	EventJobCancelled    EventType = "JobCancelled"
-	EventJobFailed       EventType = "JobFailed"
+	EventJobStarted     EventType = "JobStarted"
+	EventSourceStarted  EventType = "SourceStarted"
+	EventPageDiscovered EventType = "PageDiscovered"
+	EventPageFetched    EventType = "PageFetched"
+	// EventAcquisitionAttempt records one strategy's attempt to obtain a page.
+	EventAcquisitionAttempt EventType = "AcquisitionAttempt"
+	EventRecordFound        EventType = "RecordFound"
+	EventRecordAccepted     EventType = "RecordAccepted"
+	EventRecordRejected     EventType = "RecordRejected"
+	EventWarning            EventType = "Warning"
+	EventError              EventType = "Error"
+	EventSourceCompleted    EventType = "SourceCompleted"
+	EventJobPausing         EventType = "JobPausing"
+	EventJobPaused          EventType = "JobPaused"
+	EventJobResumed         EventType = "JobResumed"
+	EventJobFinalising      EventType = "JobFinalising"
+	EventJobCompleted       EventType = "JobCompleted"
+	EventJobPartial         EventType = "JobPartial"
+	EventJobCancelled       EventType = "JobCancelled"
+	EventJobFailed          EventType = "JobFailed"
 )
 
 // Event is an append-only job event document. Every event carries the job

@@ -154,3 +154,35 @@ func TestCompileRejectsInvalidProfiles(t *testing.T) {
 		}
 	}
 }
+
+func TestAcquisitionValidation(t *testing.T) {
+	base := func(format string, acq *contracts.Acquisition) contracts.SourceProfile {
+		return contracts.SourceProfile{ID: "x", Format: format, Request: contracts.RequestSpec{URL: "https://example.test"},
+			Acquisition: acq, Listing: contracts.Listing{Items: ".a"},
+			Fields: map[string]contracts.FieldRule{"a": {Candidate: contracts.Candidate{JSON: "a"}}}}
+	}
+	p, issues := Compile(base("", nil))
+	if issues.HasErrors() {
+		// html with a json candidate is fine; only acquisition matters here
+		t.Fatal(issues)
+	}
+	if len(p.Strategies) != 1 || p.Strategies[0].Type != "http" {
+		t.Fatalf("default strategies %+v", p.Strategies)
+	}
+	bad := []*contracts.Acquisition{
+		{},
+		{Strategies: []contracts.AcquisitionStrategy{{Type: "curl"}}},
+		{Strategies: []contracts.AcquisitionStrategy{{Type: "http"}, {Type: "http"}}},
+		{Strategies: []contracts.AcquisitionStrategy{{Type: "browser", WaitUntil: "networkidle"}}},
+		{Strategies: []contracts.AcquisitionStrategy{{Type: "browser", WaitFor: "div[["}}},
+		{Strategies: []contracts.AcquisitionStrategy{{Type: "http", WaitFor: ".a"}}},
+	}
+	for i, acq := range bad {
+		if _, issues := Compile(base("", acq)); !issues.HasErrors() {
+			t.Errorf("case %d accepted: %+v", i, acq)
+		}
+	}
+	if _, issues := Compile(base("json", &contracts.Acquisition{Strategies: []contracts.AcquisitionStrategy{{Type: "browser"}}})); !issues.HasErrors() {
+		t.Error("browser accepted for a json source")
+	}
+}

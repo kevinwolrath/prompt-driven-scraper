@@ -38,9 +38,14 @@ type state struct {
 	Seen        map[string]bool `json:"seen"`
 	Keys        map[string]bool `json:"keys"`
 	// Per-source counters used for limits.
-	ListingPages int  `json:"listingPages"`
-	Items        int  `json:"items"`
-	Failed       bool `json:"failed"`
+	ListingPages int `json:"listingPages"`
+	// Strategy is the index of the acquisition strategy to try first for the
+	// current source: after a fallback succeeds, later pages start there.
+	Strategy   int    `json:"strategy,omitempty"`
+	FailStage  string `json:"failStage,omitempty"`
+	FailReason string `json:"failReason,omitempty"`
+	Items      int    `json:"items"`
+	Failed     bool   `json:"failed"`
 }
 
 func newState() *state {
@@ -101,6 +106,10 @@ func (r *run) snapshotLocked() contracts.Job {
 func (r *run) progressLocked() contracts.Progress {
 	p := r.job.Progress
 	p.Sources = append([]contracts.SourceProgress(nil), p.Sources...)
+	for i := range p.Sources {
+		// Nested slices are mutated in place; snapshots need their own copy.
+		p.Sources[i].Acquisition = append([]contracts.AcquisitionStats(nil), p.Sources[i].Acquisition...)
+	}
 	p.ElapsedMs = r.job.RunningMs
 	if !r.runningSince.IsZero() {
 		p.ElapsedMs += r.e.opts.Now().Sub(r.runningSince).Milliseconds()
@@ -150,6 +159,7 @@ func totals(p *contracts.Progress) {
 		case contracts.SourceCompleted, contracts.SourceFailed, contracts.SourceStopped, contracts.SourceSkipped:
 			p.SourcesComplete++
 		}
+		p.PagesAttempted += s.PagesAttempted
 		p.PagesVisited += s.PagesVisited
 		p.PagesDiscovered += s.PagesDiscovered
 		p.RecordsFound += s.RecordsFound
@@ -433,11 +443,21 @@ func (r *run) execute(ctx context.Context, st *state, m mode) {
 		if st.Failed {
 			status = contracts.SourceFailed
 		}
-		r.emit(contracts.EventSourceCompleted, srcID, string(status), nil, func(j *contracts.Job) {
-			j.Progress.Sources[idx].Status = status
+		msg, data := string(status), map[string]any(nil)
+		if st.Failed {
+			msg = fmt.Sprintf("failed at %s: %s", st.FailStage, st.FailReason)
+			data = map[string]any{"stage": st.FailStage, "reason": st.FailReason}
+		}
+		r.emit(contracts.EventSourceCompleted, srcID, msg, data, func(j *contracts.Job) {
+			sp := &j.Progress.Sources[idx]
+			sp.Status = status
+			if st.Failed {
+				sp.FailureStage, sp.FailureReason = st.FailStage, st.FailReason
+			}
 		})
 		st.SourceIndex++
-		st.Seeded, st.ListingPages, st.Items, st.Failed = false, 0, 0, false
+		st.Seeded, st.ListingPages, st.Items, st.Failed, st.Strategy = false, 0, 0, false, 0
+		st.FailStage, st.FailReason = "", ""
 		r.saveState(st)
 	}
 	r.finish(ctx, st, false)

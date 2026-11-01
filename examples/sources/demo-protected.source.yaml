@@ -1,0 +1,46 @@
+# A source that refuses plain HTTP (403) and renders its listings with
+# JavaScript. Acquisition falls back from HTTP to a headless browser, then
+# the same extraction rules run on the rendered page. Requires Chrome or
+# Chromium (set PDS_BROWSER_PATH if it is not on the PATH).
+id: demo-protected
+name: Demo Motors (browser only)
+format: html
+
+request:
+  url: http://127.0.0.1:8089/demo/protected/cars
+  params:
+    fuel:
+      from: fuel
+      map: { electric: EV, petrol: Petrol, hybrid: Hybrid }
+
+acquisition:
+  strategies:
+    - type: http
+    - type: browser
+      waitUntil: domcontentloaded
+      waitFor: "article.listing-card"
+      timeoutSeconds: 30
+
+limits:
+  maxPages: 1
+  delayMs: 150
+
+listing:
+  items: "article.listing-card"
+  detailLink: { css: "a.details", attr: href }
+
+fields:
+  make:  { css: ".make" }
+  model: { css: ".model" }
+  year:  { css: ".year", transform: [integer] }
+  price: { css: ".price", transform: [currency, decimal] }
+  kilometres: { css: ".odometer", transform: [number, integer] }
+  fuelType: { const: electric }
+  location: { css: ".location" }
+  url:
+    css: "a.details"
+    attr: href
+    transform: [absoluteUrl]
+
+notes:
+  - fuelType is constant because the request asks the site for EVs only.

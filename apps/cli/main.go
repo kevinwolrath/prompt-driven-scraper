@@ -20,6 +20,7 @@ import (
 	"github.com/kevinwolrath/prompt-driven-scraper/ai"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/demosite"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/engine"
+	"github.com/kevinwolrath/prompt-driven-scraper/internal/fetch/browser"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/profile"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/storage"
 	"github.com/kevinwolrath/prompt-driven-scraper/pkg/contracts"
@@ -166,7 +167,9 @@ func run(args []string) error {
 	}
 
 	ctx := context.Background()
-	eng := engine.New(store, engine.Options{})
+	br := browser.New(browser.OptionsFromEnv())
+	defer br.Close()
+	eng := engine.New(store, engine.Options{Browser: br})
 	job, err := eng.Submit(ctx, def)
 	if err != nil {
 		var ve *engine.ValidationError

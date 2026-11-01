@@ -11,7 +11,10 @@ export interface SourceProgress {
   id: string;
   name?: string;
   status: 'pending' | 'running' | 'completed' | 'stopped' | 'skipped' | 'failed';
+  /** Logical pages tried, and how many were obtained (by any acquisition strategy). */
+  pagesAttempted?: number;
   pagesVisited: number;
+  pagesFailed?: number;
   pagesDiscovered: number;
   listingPagesTotal?: number;
   listingPagesVisited: number;
@@ -21,12 +24,24 @@ export interface SourceProgress {
   duplicates: number;
   warnings: number;
   errors: number;
+  acquisition?: AcquisitionStats[];
+  failureStage?: 'acquisition' | 'extraction';
+  failureReason?: string;
+}
+
+export interface AcquisitionStats {
+  strategy: string;
+  attempts: number;
+  succeeded: number;
+  failed: number;
+  lastResult?: string;
 }
 
 export interface Progress {
   currentSource?: string;
   sourcesTotal: number;
   sourcesComplete: number;
+  pagesAttempted?: number;
   pagesVisited: number;
   pagesDiscovered: number;
   recordsFound: number;
