@@ -183,7 +183,7 @@ func compileAcquisition(a *contracts.Acquisition, format string, issues *Issues)
 			if st.WaitUntil != "" || st.WaitFor != "" {
 				issues.Errorf(path, "waitUntil and waitFor only apply to browser strategies")
 			}
-		case "browser":
+		case "browser", "user-browser":
 			if format == "json" {
 				issues.Errorf(path+".type", "browser acquisition returns rendered HTML; it cannot be used with format: json")
 			}
@@ -198,7 +198,7 @@ func compileAcquisition(a *contracts.Acquisition, format string, issues *Issues)
 				}
 			}
 		default:
-			issues.Errorf(path+".type", "type must be http or browser, got %q", st.Type)
+			issues.Errorf(path+".type", "type must be http, browser or user-browser, got %q", st.Type)
 		}
 		if seen[st.Type] {
 			issues.Errorf(path+".type", "strategy %q is listed twice", st.Type)

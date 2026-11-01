@@ -17,6 +17,7 @@ type Request struct {
 }
 
 type Response struct {
+	TabID      string // user-browser tab retained for manual interaction
 	URL        string // final URL after redirects
 	StatusCode int
 	Body       []byte

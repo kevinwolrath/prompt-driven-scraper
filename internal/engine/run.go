@@ -32,11 +32,14 @@ const (
 
 // state is the checkpointed, resumable position of a job.
 type state struct {
-	SourceIndex int             `json:"sourceIndex"`
-	Seeded      bool            `json:"seeded"`
-	Queue       []task          `json:"queue"`
-	Seen        map[string]bool `json:"seen"`
-	Keys        map[string]bool `json:"keys"`
+	Interaction     *contracts.BrowserInteraction `json:"interaction,omitempty"`
+	ContinueBrowser bool                          `json:"continueBrowser,omitempty"`
+	PageAttempted   bool                          `json:"pageAttempted,omitempty"`
+	SourceIndex     int                           `json:"sourceIndex"`
+	Seeded          bool                          `json:"seeded"`
+	Queue           []task                        `json:"queue"`
+	Seen            map[string]bool               `json:"seen"`
+	Keys            map[string]bool               `json:"keys"`
 	// Per-source counters used for limits.
 	ListingPages int `json:"listingPages"`
 	// Strategy is the index of the acquisition strategy to try first for the
@@ -151,7 +154,7 @@ func (r *run) emitLocked(typ contracts.EventType, sourceID, msg string, data map
 // a source.
 func totals(p *contracts.Progress) {
 	*p = contracts.Progress{
-		CurrentSource: p.CurrentSource, SourcesTotal: len(p.Sources), Sources: p.Sources,
+		Interaction: p.Interaction, CurrentSource: p.CurrentSource, SourcesTotal: len(p.Sources), Sources: p.Sources,
 		Warnings: p.Warnings, Errors: p.Errors,
 	}
 	for _, s := range p.Sources {
@@ -189,6 +192,7 @@ func (r *run) setStatus(next contracts.JobStatus, reason string) error {
 		}
 	}
 	if next.Terminal() {
+		r.job.Progress.Interaction = nil
 		r.job.FinishedAt = &now
 		r.job.Progress.CurrentSource = ""
 	}
@@ -254,6 +258,10 @@ func (r *run) resume(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		r.ctrl = ctrlNone
+		if st.Interaction != nil {
+			st.ContinueBrowser = true
+			r.emitLocked(contracts.EventBrowserInteractionResumed, st.Interaction.SourceID, "user requested Continue; reading the same Chrome tab", map[string]any{"url": st.Interaction.URL, "tabId": st.Interaction.TabID}, func(j *contracts.Job) { j.Progress.Interaction = nil })
+		}
 		r.job.StatusReason = ""
 		r.mu.Unlock()
 		if err := r.transition(contracts.EventJobResumed, contracts.JobRunning, "", map[string]any{"queued": len(st.Queue)}); err != nil {
@@ -437,6 +445,29 @@ func (r *run) execute(ctx context.Context, st *state, m mode) {
 				r.cancelled(st)
 				return
 			}
+			if st.Interaction != nil {
+				st.Queue = append([]task{t}, st.Queue...)
+				r.saveState(st)
+				r.mu.Lock()
+				switch r.ctrl {
+				case ctrlCancel:
+					r.mu.Unlock()
+					r.cancelled(st)
+					return
+				case ctrlFinalise:
+					r.mu.Unlock()
+					r.finish(ctx, st, true)
+					return
+				}
+				if r.job.Status == contracts.JobRunning {
+					_ = r.setStatus(contracts.JobPausing, "")
+				}
+				_ = r.setStatus(contracts.JobPaused, "browser interaction required")
+				r.emitLocked(contracts.EventBrowserInteractionRequired, srcID, st.Interaction.Reason, map[string]any{"url": st.Interaction.URL, "title": st.Interaction.Title, "tabId": st.Interaction.TabID}, func(j *contracts.Job) { j.Progress.Interaction = st.Interaction })
+				r.mu.Unlock()
+				return
+			}
+			st.PageAttempted = false
 			r.saveState(st)
 		}
 		status := contracts.SourceCompleted

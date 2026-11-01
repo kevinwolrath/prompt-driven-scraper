@@ -192,3 +192,32 @@ func TestSessionRunFlowSurvivesRestart(t *testing.T) {
 		t.Fatalf("resuming a finished run: %d", code)
 	}
 }
+func TestForeignWebOriginCannotControlLocalBrowser(t *testing.T) {
+	called := false
+	handler := cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true; w.WriteHeader(200) }))
+	req := httptest.NewRequest("POST", "http://localhost:8080/api/sessions/x/runs", nil)
+	req.Header.Set("Origin", "https://unrelated.example")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden || called {
+		t.Fatalf("foreign origin reached control handler: %d", rr.Code)
+	}
+	req.Header.Set("Origin", "http://localhost:5173")
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != 200 || !called || rr.Header().Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
+		t.Fatal("local development UI was refused")
+	}
+}
+func TestLocalOperatorRejectsRemoteClientsAndReboundHost(t *testing.T) {
+	for _, tc := range []struct {
+		host, remote string
+		want         bool
+	}{{"localhost:8080", "127.0.0.1:1234", true}, {"127.0.0.1:8080", "127.0.0.1:1234", true}, {"localhost:8080", "192.0.2.1:1234", false}, {"unrelated.example:8080", "127.0.0.1:1234", false}} {
+		r := httptest.NewRequest("POST", "http://"+tc.host+"/api/sessions/x/runs", nil)
+		r.RemoteAddr = tc.remote
+		if got := localOperator(r); got != tc.want {
+			t.Errorf("host=%s remote=%s local=%v", tc.host, tc.remote, got)
+		}
+	}
+}

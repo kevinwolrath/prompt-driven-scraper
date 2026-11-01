@@ -9,6 +9,7 @@
   "properties": {
     "id": { "type": "string" },
     "name": { "type": "string", "minLength": 1 },
+    "browserMode": { "enum": ["automatic", "http", "browser", "user-browser"], "description": "Execution override; automatic follows each source profile." },
     "queryInput": { "type": "string", "description": "The user's request in their own words." },
     "query": {
       "type": "object",

@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -68,7 +70,9 @@ func main() {
 	// The browser starts only if a source's acquisition strategies need it.
 	br := browser.New(browser.OptionsFromEnv())
 	defer br.Close()
-	eng := engine.New(store, engine.Options{Browser: br})
+	userBrowser := browser.NewUser(browser.UserOptionsFromEnv())
+	defer userBrowser.Close()
+	eng := engine.New(store, engine.Options{Browser: br, UserBrowser: userBrowser})
 	recovered, err := eng.Recover(ctx)
 	if err != nil {
 		log.Fatalf("recover runs: %v", err)
@@ -142,7 +146,7 @@ type server struct {
 
 // apiFeatures lets the UI detect an API build that is older than itself
 // (for example a long-running `go run ./apps/api` started before a pull).
-var apiFeatures = []string{"sessions", "runs", "ai-authoring-prompt"}
+var apiFeatures = []string{"sessions", "runs", "ai-authoring-prompt", "user-browser"}
 
 type apiInfo struct {
 	Features []string `json:"features"`
@@ -314,6 +318,25 @@ func (s *server) updateSession(w http.ResponseWriter, r *http.Request) {
 
 // runSession starts a new run of the session's saved configuration.
 func (s *server) runSession(w http.ResponseWriter, r *http.Request) {
+	if !localOperator(r) {
+		sess, err := s.sessions.Get(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeSessionError(w, err)
+			return
+		}
+		def := sess.Definition
+		compiled, _, err := s.engine.Prepare(r.Context(), &def)
+		if err == nil {
+			for _, p := range compiled {
+				for _, a := range p.Strategies {
+					if a.Type == "user-browser" {
+						writeError(w, http.StatusForbidden, errors.New("User Browser runs require a local operator connection"))
+						return
+					}
+				}
+			}
+		}
+	}
 	job, err := s.sessions.Run(r.Context(), r.PathValue("id"))
 	if err != nil {
 		var ve *engine.ValidationError
@@ -351,7 +374,12 @@ func (s *server) controlJob(w http.ResponseWriter, r *http.Request) {
 	switch r.PathValue("action") {
 	case "pause":
 		job, err = s.engine.Pause(r.Context(), id)
-	case "resume":
+	case "resume", "continue":
+		current, getErr := s.engine.Get(r.Context(), id)
+		if getErr == nil && (current.Progress.Interaction != nil || usesUserBrowser(current.Definition)) && !localOperator(r) {
+			writeError(w, http.StatusForbidden, errors.New("continuing User Browser requires a local operator connection"))
+			return
+		}
 		job, err = s.engine.Resume(r.Context(), id)
 	case "cancel":
 		job, err = s.engine.Cancel(r.Context(), id)
@@ -532,7 +560,16 @@ func nonNilRecords(r []contracts.Record) []contracts.Record {
 // cors allows a separately served UI (e.g. the Vite dev server) to call the API.
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || u.Host != r.Host && !loopbackHost(u.Hostname()) {
+				writeError(w, http.StatusForbidden, errors.New("request origin is not an allowed application origin"))
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -560,4 +597,36 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func loopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return host == "localhost" || ip != nil && ip.IsLoopback()
+}
+func localOperator(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	requestHost := r.Host
+	if h, _, e := net.SplitHostPort(requestHost); e == nil {
+		requestHost = h
+	}
+	return err == nil && loopbackHost(host) && loopbackHost(requestHost)
+}
+
+func usesUserBrowser(def contracts.JobDefinition) bool {
+	if def.BrowserMode == "user-browser" {
+		return true
+	}
+	if def.BrowserMode != "" && def.BrowserMode != "automatic" {
+		return false
+	}
+	for _, src := range def.SearchSources {
+		if src.Profile != nil && src.Profile.Acquisition != nil {
+			for _, a := range src.Profile.Acquisition.Strategies {
+				if a.Type == "user-browser" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

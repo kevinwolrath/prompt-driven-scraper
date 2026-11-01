@@ -169,7 +169,9 @@ func run(args []string) error {
 	ctx := context.Background()
 	br := browser.New(browser.OptionsFromEnv())
 	defer br.Close()
-	eng := engine.New(store, engine.Options{Browser: br})
+	userBrowser := browser.NewUser(browser.UserOptionsFromEnv())
+	defer userBrowser.Close()
+	eng := engine.New(store, engine.Options{Browser: br, UserBrowser: userBrowser})
 	job, err := eng.Submit(ctx, def)
 	if err != nil {
 		var ve *engine.ValidationError
