@@ -553,6 +553,52 @@ function AiPromptPanel() {
   );
 }
 
+// DiagnosticsButtons copies or shows the run's diagnostics report (built by
+// the API from the stored run), e.g. to paste into an AI assistant when a
+// profile needs fixing.
+function DiagnosticsButtons({ runId }: { runId: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [report, setReport] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (state === 'idle') return;
+    const t = setTimeout(() => setState('idle'), 2000);
+    return () => clearTimeout(t);
+  }, [state]);
+  const copy = async () => {
+    try {
+      setState((await copyText(await api.diagnostics(runId))) ? 'copied' : 'failed');
+    } catch {
+      setState('failed');
+    }
+  };
+  const view = async () => {
+    setReport(await api.diagnostics(runId).catch((e) => `Could not load diagnostics: ${e.message}`));
+    dialog.current?.showModal();
+  };
+  return (
+    <>
+      <button onClick={copy} title="Copy a text report of this run: configuration, per-source stages and events">
+        {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy run diagnostics'}
+      </button>
+      <button onClick={view}>View diagnostics</button>
+      <dialog ref={dialog} className="prompt-dialog">
+        <div className="dialog-head">
+          <h2>Run diagnostics</h2>
+          <div className="actions">
+            <CopyButton text={report} label="Copy" className="primary" />
+            <button onClick={() => dialog.current?.close()}>Close</button>
+          </div>
+        </div>
+        <p className="muted small">
+          Paste this into the AI session that wrote the configuration and ask it to fix the failing source.
+        </p>
+        <pre className="prompt-text">{report}</pre>
+      </dialog>
+    </>
+  );
+}
+
 function CopyButton({ text, label, className }: { text: string | null; label: string; className?: string }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
@@ -723,6 +769,7 @@ function RunPanel({ job, sessionId, onUpdate, onStatusChange }: { job: Job; sess
               <button className="danger" onClick={() => act('cancel')} disabled={busy}>Cancel</button>
             </>
           )}
+          <DiagnosticsButtons runId={job.id} />
           {hasOutput && (
             <a className="button" href={api.outputUrl(job.id)} download>
               Download {job.status === 'partial' ? 'partial ' : ''}output

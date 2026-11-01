@@ -305,7 +305,9 @@ func (r *run) processListing(ctx context.Context, idx int, p *extract.Profile, s
 		}
 	})
 	if len(items) == 0 && len(skipped) == 0 {
-		r.warn(idx, fmt.Sprintf("listing page %d has no items matching %q", t.Page, p.Source.Listing.Items), map[string]any{"url": resp.URL})
+		// Record what the page did contain so the profile can be fixed.
+		r.warn(idx, fmt.Sprintf("listing page %d has no items matching %q", t.Page, p.Source.Listing.Items),
+			map[string]any{"url": resp.URL, "stage": contracts.StageExtraction, "outline": extract.Outline(page, len(resp.Body))})
 	}
 	for _, reason := range skipped {
 		r.srcEvent(idx, contracts.EventRecordRejected, reason, map[string]any{"url": resp.URL}, func(sp *contracts.SourceProgress) {

@@ -329,6 +329,27 @@ Otherwise pick an interpretation (e.g. "after 2024" → `year gte 2024` when the
 onwards"), encode it in `query.filters`, and state it in your verification notes so it is
 reviewable.
 
+## 9a. When the user pastes a Run Diagnostics report
+
+The UI's **Copy run diagnostics** produces a report starting with
+`Prompt Driven Scraper — Run Diagnostics`. It contains the exact configuration the run used, and
+for each source three stages. Fix the stage that failed:
+
+| Report says | Meaning | What to change |
+| --- | --- | --- |
+| Acquisition: HTTP 403 / 401 / 429, no browser line | The site refused plain HTTP | Add `acquisition` with `http` then `browser` (§4) |
+| Acquisition: bot challenge / access denied on **every** strategy | The site blocks automated access | Do not try to work around it. Tell the user the source cannot be scraped this way and suggest removing it or using another source |
+| Acquisition: HTTP 404 | The URL is wrong | Fix `request.url` / `request.params` |
+| Extraction: 0 items on N loaded pages | `listing.items` matches nothing on the page that loaded | Pick `listing.items` from **Most repeated elements**: choose the selector whose count matches the number of results and whose sample text looks like one listing. Then fix the field selectors relative to it |
+| Extraction hint: rendered by JavaScript | The HTML has no listings yet | Add a `browser` strategy with `waitFor` set to the listing selector |
+| Extraction hint: embedded JSON / JSON-LD | The data is in structured form | Prefer `jsonld` or `css` + `json` candidates |
+| Filtering: many rejections with one reason | Values are missing or wrongly converted, or a filter is too strict | Read the reason: missing required field → add candidates or make the field optional; filter mismatch → check transforms (e.g. `currency`) and the filter values |
+| "query param … not supported" warnings | Informational: those constraints rely on `query.filters` | Map the param in `request.params` if the site supports it, otherwise ignore |
+
+Change only what the evidence supports, return the complete corrected configuration, and say
+what you changed and why. Don't guess selectors that the report gives you no evidence for; say
+they still need verifying.
+
 ## 10. Checklist before you answer
 
 - [ ] Every key appears in this document; every transform is in the transform table.

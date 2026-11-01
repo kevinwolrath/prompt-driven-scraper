@@ -20,6 +20,7 @@ import (
 
 	"github.com/kevinwolrath/prompt-driven-scraper/ai"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/demosite"
+	"github.com/kevinwolrath/prompt-driven-scraper/internal/diagnostics"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/engine"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/fetch/browser"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/profile"
@@ -171,6 +172,7 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/runs/{id}/events", s.events)
 	mux.HandleFunc("GET /api/runs/{id}/records", s.records)
 	mux.HandleFunc("GET /api/runs/{id}/output", s.output)
+	mux.HandleFunc("GET /api/runs/{id}/diagnostics", s.diagnostics)
 	return mux
 }
 
@@ -455,6 +457,24 @@ func (s *server) records(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, nonNilRecords(recs))
+}
+
+// diagnostics returns a plain-text report of the run for people and AI
+// assistants: configuration snapshot, per-source acquisition, extraction
+// and filtering results, and the event log.
+func (s *server) diagnostics(w http.ResponseWriter, r *http.Request) {
+	job, err := s.engine.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	events, err := s.store.ListEvents(r.Context(), job.ID, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = io.WriteString(w, diagnostics.Report(job, events))
 }
 
 func (s *server) output(w http.ResponseWriter, r *http.Request) {

@@ -458,6 +458,8 @@ func (r *run) execute(ctx context.Context, st *state, m mode) {
 		st.SourceIndex++
 		st.Seeded, st.ListingPages, st.Items, st.Failed, st.Strategy = false, 0, 0, false, 0
 		st.FailStage, st.FailReason = "", ""
+		// Pages are de-duplicated within a source; records across sources.
+		st.Seen = map[string]bool{}
 		r.saveState(st)
 	}
 	r.finish(ctx, st, false)
