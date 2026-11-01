@@ -245,3 +245,22 @@ func TestAcquisitionAttemptsArePersisted(t *testing.T) {
 		t.Fatalf("persisted progress %+v", sp)
 	}
 }
+
+// Two sources may start from the same URL (e.g. two profiles for one site);
+// the second must not be skipped because the first already fetched it.
+func TestSourcesWithTheSameURLBothRun(t *testing.T) {
+	srv := acqSite(t)
+	def := acqJob(srv.URL+"/open/cars", nil)
+	second := *def.SearchSources[0].Profile
+	second.ID = "site-2"
+	def.SearchSources = append(def.SearchSources, contracts.SourceRef{ID: "site-2", Profile: &second})
+	job, _ := runAcq(t, storage.NewMemoryStore(), nil, def)
+	for _, sp := range job.Progress.Sources {
+		if sp.PagesAttempted != 1 || sp.PagesVisited != 1 || sp.RecordsFound != 2 {
+			t.Fatalf("source %s: %+v", sp.ID, sp)
+		}
+	}
+	if job.Progress.Duplicates != 1 { // cross-source record dedupe still applies
+		t.Fatalf("duplicates %d", job.Progress.Duplicates)
+	}
+}

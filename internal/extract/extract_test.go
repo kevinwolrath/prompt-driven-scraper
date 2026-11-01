@@ -2,6 +2,7 @@ package extract
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kevinwolrath/prompt-driven-scraper/pkg/contracts"
@@ -184,5 +185,37 @@ func TestAcquisitionValidation(t *testing.T) {
 	}
 	if _, issues := Compile(base("json", &contracts.Acquisition{Strategies: []contracts.AcquisitionStrategy{{Type: "browser"}}})); !issues.HasErrors() {
 		t.Error("browser accepted for a json source")
+	}
+}
+
+func TestOutlineDescribesPageStructure(t *testing.T) {
+	html := `<html><head><title>Used cars</title>
+<script type="application/ld+json">{"@type":"ItemList"}</script>
+<script id="__NEXT_DATA__" type="application/json">{"props":{}}</script></head><body>
+<div class="results">` + strings.Repeat(`<div class="card listing-tile" data-testid="listing"><h3 class="title">2016 Toyota Prius</h3></div>`, 4) + `</div>
+<article>Ad</article></body></html>`
+	p, err := ParsePage("html", "https://example.test/cars", []byte(html), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := Outline(p, len(html))
+	if o.Title != "Used cars" || o.Bytes != len(html) || o.Scripts != 2 {
+		t.Fatalf("outline %+v", o)
+	}
+	want := map[string]int{`div[data-testid="listing"]`: 4, "div.card": 4, "div.listing-tile": 4, "h3.title": 4}
+	got := map[string]int{}
+	for _, r := range o.Repeated {
+		got[r.Selector] = r.Count
+	}
+	for sel, n := range want {
+		if got[sel] != n {
+			t.Errorf("%s: got %d want %d (%+v)", sel, got[sel], n, o.Repeated)
+		}
+	}
+	if o.Repeated[0].Sample != "2016 Toyota Prius" {
+		t.Errorf("sample %q", o.Repeated[0].Sample)
+	}
+	if len(o.JSONLDTypes) != 1 || o.JSONLDTypes[0] != "ItemList" || len(o.EmbeddedJSON) != 1 || !strings.HasPrefix(o.EmbeddedJSON[0], "script#__NEXT_DATA__") {
+		t.Errorf("json %+v %+v", o.JSONLDTypes, o.EmbeddedJSON)
 	}
 }

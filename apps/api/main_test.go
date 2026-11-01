@@ -181,6 +181,13 @@ func TestSessionRunFlowSurvivesRestart(t *testing.T) {
 	if !strings.Contains(string(stream), "event: RecordAccepted") || !strings.Contains(string(stream), "event: JobCompleted") {
 		t.Fatal("event replay incomplete")
 	}
+	resp, _ = http.Get(ts.URL + "/api/runs/" + run1.ID + "/diagnostics")
+	diag, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(diag), "Run #1") || !strings.Contains(string(diag), "CONFIGURATION") ||
+		!strings.Contains(string(diag), "SOURCE: Demo Motors (HTML)") {
+		t.Fatalf("diagnostics: %d\n%s", resp.StatusCode, diag)
+	}
 	if code := call(t, "POST", ts.URL+"/api/runs/"+run1.ID+"/resume", nil, nil); code != 409 {
 		t.Fatalf("resuming a finished run: %d", code)
 	}

@@ -184,4 +184,5 @@ export const api = {
     call<Job>('POST', `/api/runs/${id}/${action}`),
   events: (id: string) => new EventSource(`/api/runs/${id}/events`),
   outputUrl: (id: string) => `/api/runs/${id}/output`,
+  diagnostics: (id: string) => text(`/api/runs/${id}/diagnostics`),
 };
