@@ -217,16 +217,17 @@ func (b *Browser) Load(ctx context.Context, req fetch.BrowserRequest) (fetch.Res
 			// Say what the page was when time ran out: a challenge or an
 			// HTTP error is more useful than the timeout alone.
 			readCtx, cancelRead := context.WithTimeout(tabCtx, 5*time.Second)
-			var html string
-			_ = chromedp.Run(readCtx, chromedp.OuterHTML("html", &html, chromedp.ByQuery))
+			var html, title, location string
+			_ = chromedp.Run(readCtx, chromedp.Location(&location), chromedp.Title(&title), chromedp.OuterHTML("html", &html, chromedp.ByQuery))
+			resp := fetch.Response{URL: location, StatusCode: code, Body: []byte(html), Title: title}
 			cancelRead()
 			if m := fetch.DetectBlock([]byte(html)); m != "" {
-				return fetch.Response{}, fmt.Errorf("%w: %w", &fetch.BlockedError{URL: req.URL, Status: code, Marker: m}, te)
+				return resp, fmt.Errorf("%w: %w", &fetch.BlockedError{URL: req.URL, Status: code, Marker: m}, te)
 			}
 			if code >= 400 {
-				return fetch.Response{}, fmt.Errorf("%w: %w", &fetch.StatusError{URL: req.URL, Code: code}, te)
+				return resp, fmt.Errorf("%w: %w", &fetch.StatusError{URL: req.URL, Code: code}, te)
 			}
-			return fetch.Response{}, te
+			return resp, te
 		}
 		// Chrome fails a navigation outright when the page is an HTTP error
 		// with no body (net::ERR_HTTP_RESPONSE_CODE_FAILURE). Report the

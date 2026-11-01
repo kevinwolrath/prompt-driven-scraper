@@ -159,14 +159,18 @@ func (r *run) acquire(ctx context.Context, idx int, p *extract.Profile, st *stat
 			data["page"] = t.Page
 		}
 		var se *fetch.StatusError
-		if errors.As(err, &se) {
+		var be *fetch.BlockedError
+		if errors.As(err, &be) {
+			data["status"], data["blockMarker"] = be.Status, be.Marker
+		} else if errors.As(err, &se) {
 			data["status"] = se.Code
 		} else if resp.StatusCode != 0 {
 			data["status"] = resp.StatusCode
 		}
 		if err != nil {
 			data["error"] = err.Error()
-		} else {
+		}
+		if resp.URL != "" {
 			data["finalUrl"], data["bytes"] = resp.URL, len(resp.Body)
 			if resp.Title != "" {
 				data["title"] = resp.Title
