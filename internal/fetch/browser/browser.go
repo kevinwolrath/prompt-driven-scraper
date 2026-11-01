@@ -228,6 +228,12 @@ func (b *Browser) Load(ctx context.Context, req fetch.BrowserRequest) (fetch.Res
 			}
 			return fetch.Response{}, te
 		}
+		// Chrome fails a navigation outright when the page is an HTTP error
+		// with no body (net::ERR_HTTP_RESPONSE_CODE_FAILURE). Report the
+		// status the server sent, which is what the failure actually was.
+		if code >= 400 {
+			return fetch.Response{}, &fetch.StatusError{URL: req.URL, Code: code}
+		}
 		return fetch.Response{}, fmt.Errorf("browser %s: %w", step, err)
 	}
 	resp := fetch.Response{URL: location, StatusCode: code, Body: []byte(html), Title: title}
