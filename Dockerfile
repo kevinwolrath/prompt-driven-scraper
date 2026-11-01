@@ -14,12 +14,15 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /out/api ./apps/api && CGO_ENABLED=0 go build -o /out/scraper ./apps/cli
 
 FROM alpine:3.20
+# Chromium for the "browser" acquisition strategy.
+RUN apk add --no-cache chromium
 WORKDIR /app
 COPY --from=api /out/api /out/scraper /usr/local/bin/
 COPY --from=web /src/apps/web/dist ./web
 COPY examples ./examples
 ENV PDS_ADDR=:8080 PDS_PROFILES=/app/examples/sources PDS_WEB=/app/web \
-    PDS_STORE=sqlite PDS_DB=/data/prompt-driven-scraper.db
+    PDS_STORE=sqlite PDS_DB=/data/prompt-driven-scraper.db \
+    PDS_BROWSER_PATH=/usr/bin/chromium-browser
 # Sessions, runs and results live in the SQLite file; mount a volume to keep them.
 VOLUME /data
 EXPOSE 8080

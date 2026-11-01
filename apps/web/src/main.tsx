@@ -46,7 +46,7 @@ const DEMO_DEFINITION: Definition = {
 };
 
 const EVENT_TYPES = [
-  'JobStarted', 'SourceStarted', 'PageDiscovered', 'PageFetched', 'RecordFound', 'RecordAccepted',
+  'JobStarted', 'SourceStarted', 'PageDiscovered', 'AcquisitionAttempt', 'PageFetched', 'RecordFound', 'RecordAccepted',
   'RecordRejected', 'Warning', 'Error', 'SourceCompleted', 'JobPausing', 'JobPaused', 'JobResumed',
   'JobFinalising', 'JobCompleted', 'JobPartial', 'JobCancelled', 'JobFailed',
 ];
@@ -735,12 +735,14 @@ function RunPanel({ job, sessionId, onUpdate, onStatusChange }: { job: Job; sess
 
       <table className="source-table">
         <thead>
-          <tr><th>Source</th><th>Status</th><th>Progress</th><th>Pages</th><th>Found</th><th>Accepted</th><th>Rejected</th><th>Dupes</th><th>Warn/Err</th></tr>
+          <tr><th>Source</th><th>Status</th><th>Progress</th><th>Pages loaded</th><th>Found</th><th>Accepted</th><th>Rejected</th><th>Dupes</th><th>Warn/Err</th></tr>
         </thead>
         <tbody>
           {p.sources.map((s) => <SourceRow key={s.id} s={s} />)}
         </tbody>
       </table>
+
+      <SourceDiagnostics sources={p.sources} />
 
       <div className="split">
         <div>
@@ -794,10 +796,76 @@ function RunPanel({ job, sessionId, onUpdate, onStatusChange }: { job: Job; sess
   );
 }
 
+// SourceDiagnostics tells apart the three ways a source can come up empty:
+// the page could not be acquired, it was acquired but nothing was extracted,
+// or records were extracted and then rejected by the filters.
+function SourceDiagnostics({ sources }: { sources: SourceProgress[] }) {
+  const shown = sources.filter((s) => s.status !== 'pending');
+  if (shown.length === 0) return null;
+  return (
+    <div className="diagnostics">
+      {shown.map((s) => {
+        const attempted = s.pagesAttempted ?? s.pagesVisited;
+        const loaded = s.pagesVisited;
+        const used = (s.acquisition ?? []).filter((a) => a.attempts > 0);
+        const extractionFailed = s.failureStage === 'extraction' || (loaded > 0 && s.recordsFound === 0 && s.status !== 'running');
+        return (
+          <div key={s.id} className="diag">
+            <strong>{s.name ?? s.id}</strong>
+            <dl>
+              <dt>Acquisition</dt>
+              <dd>
+                {used.length === 0 && <span className="muted">not started</span>}
+                {used.map((a, i) => {
+                  const ok = a.succeeded > 0;
+                  const label = ({ http: 'HTTP', browser: 'Browser' } as Record<string, string>)[a.strategy] ?? a.strategy;
+                  return (
+                    <span key={a.strategy} className={`attempt ${ok ? 'ok' : 'bad'}`}>
+                      {ok ? '✓' : '✗'} {label}{i > 0 ? ' fallback' : ''}: {ok && a.failed === 0 ? 'page loaded' : a.lastResult}
+                      <small className="muted"> ({a.succeeded}/{a.attempts} ok)</small>
+                    </span>
+                  );
+                })}
+                <small className="muted"> · pages loaded {loaded} of {attempted} attempted</small>
+              </dd>
+              <dt>Extraction</dt>
+              <dd>
+                {loaded === 0 ? (
+                  <span className="muted">not reached (no page acquired)</span>
+                ) : extractionFailed ? (
+                  <span className="attempt bad">
+                    ✗ {s.recordsFound} items on {loaded} loaded page{loaded === 1 ? '' : 's'}: check listing.items and the field rules
+                  </span>
+                ) : (
+                  <span className="attempt ok">✓ {s.recordsFound} items found on {loaded} loaded page{loaded === 1 ? '' : 's'}</span>
+                )}
+              </dd>
+              <dt>Filtering</dt>
+              <dd>
+                {s.recordsFound === 0 ? (
+                  <span className="muted">not reached</span>
+                ) : (
+                  <span>
+                    {s.recordsAccepted} accepted · {s.recordsRejected} rejected · {s.duplicates} duplicate{s.duplicates === 1 ? '' : 's'}
+                    {s.recordsAccepted === 0 && <span className="attempt bad"> (all rejected: see rejection reasons)</span>}
+                  </span>
+                )}
+              </dd>
+            </dl>
+            {s.status === 'failed' && (
+              <p className="attempt bad">Source failed at {s.failureStage ?? 'an unknown stage'}: {s.failureReason}</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Totals({ p }: { p: Progress }) {
-  const items: [string, number][] = [
-    ['sources', p.sourcesComplete],
-    ['pages visited', p.pagesVisited],
+  const items: [string, React.ReactNode][] = [
+    ['sources', `${p.sourcesComplete}/${p.sourcesTotal}`],
+    ['pages loaded / attempted', `${p.pagesVisited}/${p.pagesAttempted ?? p.pagesVisited}`],
     ['records found', p.recordsFound],
     ['accepted', p.recordsAccepted],
     ['rejected', p.recordsRejected],
@@ -810,7 +878,7 @@ function Totals({ p }: { p: Progress }) {
       {items.map(([k, v]) => (
         <div key={k}>
           <dt>{k}</dt>
-          <dd>{k === 'sources' ? `${v}/${p.sourcesTotal}` : v}</dd>
+          <dd>{v}</dd>
         </div>
       ))}
     </dl>
@@ -832,7 +900,7 @@ function SourceRow({ s }: { s: SourceProgress }) {
           {known ? `listing page ${s.listingPagesVisited} of ${s.listingPagesTotal}` : s.status === 'running' ? `listing page ${s.listingPagesVisited}, total unknown` : ''}
         </small>
       </td>
-      <td>{s.pagesVisited}<span className="muted">/{s.pagesDiscovered}</span></td>
+      <td title="loaded / attempted">{s.pagesVisited}<span className="muted">/{s.pagesAttempted ?? s.pagesVisited}</span></td>
       <td>{s.recordsFound}</td>
       <td>{s.recordsAccepted}</td>
       <td>{s.recordsRejected}</td>
@@ -843,6 +911,9 @@ function SourceRow({ s }: { s: SourceProgress }) {
 }
 
 function logLine(ev: JobEvent): LogLine | null {
+  if (ev.type === 'AcquisitionAttempt') {
+    return ev.data?.ok ? null : { seq: ev.seq, type: ev.type, source: ev.sourceId, text: `${ev.message} (${ev.data?.url})` };
+  }
   if (!['Warning', 'Error', 'RecordRejected', 'JobFailed', 'JobPartial', 'JobCancelled'].includes(ev.type)) return null;
   return { seq: ev.seq, type: ev.type, source: ev.sourceId, text: ev.message ?? '' };
 }
@@ -854,7 +925,7 @@ function reasonOf(ev: JobEvent, current?: string) {
 }
 
 function label(type: string) {
-  return ({ RecordRejected: 'rejected', Warning: 'warning', Error: 'error' } as Record<string, string>)[type] ?? type;
+  return ({ RecordRejected: 'rejected', Warning: 'warning', Error: 'error', AcquisitionAttempt: 'acquisition' } as Record<string, string>)[type] ?? type;
 }
 
 function formatTime(iso?: string) {

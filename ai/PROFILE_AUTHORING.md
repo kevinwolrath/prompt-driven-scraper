@@ -106,6 +106,14 @@ request:
     sort: { value: newest }                     # constant parameter
   headers: { Accept-Language: en-AU }           # optional
 
+acquisition:            # optional; omit for plain HTTP (see "Acquisition" below)
+  strategies:
+    - type: http
+    - type: browser
+      waitUntil: domcontentloaded
+      waitFor: "article.listing-card"   # usually the listing.items selector
+      timeoutSeconds: 45
+
 limits:
   maxPages: 20          # listing pages per source
   maxRecords: 500       # listing items processed per source
@@ -147,6 +155,33 @@ How the engine runs a source, in this exact order:
 3. For each item: evaluate `item`/`listing` candidates; if `followDetail`, queue the detail page.
 4. Detail pages are fetched in listing order before the next listing page.
 5. Fields are chosen (§5), converted to output types, filtered, deduplicated, then accepted.
+
+### Acquisition (how pages are obtained)
+
+Getting a page (acquisition) is separate from reading records out of it (extraction, §5) and
+checking them against the query (filtering, `query.filters`). `acquisition.strategies` is an
+ordered list; omit it and every page is fetched with plain HTTP.
+
+| Strategy | Does | Options |
+| --- | --- | --- |
+| `http` | Plain HTTP GET with `request.headers`. Fast and cheap. Retries network errors, 429 and 5xx (`limits.retries`). | none |
+| `browser` | Loads the page in headless Chrome/Chromium and uses the rendered DOM, so content added by JavaScript is visible. | `waitUntil`: `load` (default) or `domcontentloaded`; `waitFor`: CSS selector to wait for on **listing** pages; `timeoutSeconds` (default 45) |
+
+A later strategy runs only if the previous one failed with HTTP **401, 403 or 429** or returned a
+recognised bot-challenge / access-denied page. A 404, 500 or network error fails the page
+without a fallback, because another strategy would fail the same way. Once a fallback works, the
+rest of that source's pages start with it. Whatever strategy loads the page, the same `listing`,
+`fields` and filters apply. Never write strategy-specific selectors.
+
+Guidance:
+- Prefer `http` alone when the listing HTML (or JSON-LD / embedded JSON) contains the data.
+- Use `[http, browser]` when a site refuses plain HTTP clients (403) or renders its listings
+  with JavaScript. Set `waitFor` to `listing.items` so the DOM is read after the items appear.
+- Use `[browser]` alone only when HTTP never works for the site; it is much slower.
+- `browser` cannot be used with `format: json`.
+- The browser is a real browser, not a way around access controls. Interactive challenges
+  (CAPTCHAs, "verify you are human") are reported as acquisition failures, not solved. If a site
+  shows one, say so in your reply instead of trying to work around it.
 
 Pagination stops when a page has no items, there is no next link, the known page total or
 `maxPages` is reached. If a source does not expose a total, leave `totalResults`/`totalPages`
@@ -260,10 +295,11 @@ Prefer listing-page fallbacks for every important field: if a detail page fails,
 ## 7. Determinism rules
 
 - Do not use randomness, dates relative to "now", or anything that depends on who runs the job.
-- Do not rely on JavaScript execution, clicking, scrolling or logging in — the engine fetches pages
-  with plain HTTP GET. If content only appears after JavaScript runs, look for the same data in
-  JSON-LD, `__NEXT_DATA__`/embedded JSON (`css` + `json`), or a public JSON endpoint the page itself
-  calls (`format: json`). If none exists, report it as unsupported.
+- Do not rely on clicking, scrolling, form filling or logging in: none are supported. Pages are
+  fetched with plain HTTP by default. If content only appears after JavaScript runs, first look
+  for the same data in JSON-LD, `__NEXT_DATA__`/embedded JSON (`css` + `json`), or a public JSON
+  endpoint the page itself calls (`format: json`). Otherwise add a `browser` acquisition
+  strategy, which reads the DOM after the page has rendered.
 - Keep `delayMs` polite (≥ 1000 for commercial sites) and set realistic `maxPages`.
 - Respect the site's terms of use and robots.txt; tell the user if a site forbids scraping.
 
@@ -303,6 +339,8 @@ reviewable.
 - [ ] Known traps are handled with `reject`, `prefer`, `ignore` or `listing.skip`.
 - [ ] `from: detail` is only used with `listing.followDetail: true`.
 - [ ] Pagination uses `next` **or** `param`, not both; totals only if the site really shows one.
+- [ ] `acquisition` is omitted for plain HTTP, or lists `http` then `browser` (with `waitFor`
+      set to the listing selector) for sites that refuse plain HTTP or render with JavaScript.
 - [ ] Unsupported requirements are listed, not faked.
 
 ## Appendix: complete working example

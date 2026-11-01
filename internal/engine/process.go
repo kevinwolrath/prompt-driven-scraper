@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/extract"
@@ -36,6 +37,12 @@ func (r *run) srcEvent(idx int, typ contracts.EventType, msg string, data map[st
 	})
 }
 
+// failSource marks the current source failed; the stage and reason are
+// reported with its SourceCompleted event.
+func (r *run) failSource(_ int, st *state, stage, reason string) {
+	st.Failed, st.FailStage, st.FailReason = true, stage, reason
+}
+
 func (r *run) warn(idx int, msg string, data map[string]any) {
 	r.srcEvent(idx, contracts.EventWarning, msg, data, nil)
 }
@@ -53,13 +60,13 @@ func (r *run) seed(idx int, p *extract.Profile, st *state) {
 		r.warn(idx, w, nil)
 	}
 	if err != nil {
-		st.Failed = true
+		r.failSource(idx, st, contracts.StageAcquisition, "could not build the request URL: "+err.Error())
 		r.srcEvent(idx, contracts.EventError, err.Error(), nil, nil)
 		return
 	}
 	if pg := p.Source.Pagination; pg != nil && pg.Param != nil {
 		if start, err = query.WithParam(start, pg.Param.Name, pageStart(pg.Param)); err != nil {
-			st.Failed = true
+			r.failSource(idx, st, contracts.StageAcquisition, "could not build the request URL: "+err.Error())
 			r.srcEvent(idx, contracts.EventError, err.Error(), nil, nil)
 			return
 		}
@@ -113,14 +120,144 @@ func (r *run) fetch(ctx context.Context, idx int, p *extract.Profile, rawURL str
 		}
 		lastErr = err
 		var se *fetch.StatusError
-		if ctx.Err() != nil || (errors.As(err, &se) && !se.Retryable()) {
-			break
+		var be *fetch.BlockedError
+		if ctx.Err() != nil || (errors.As(err, &se) && !se.Retryable()) || errors.As(err, &be) {
+			break // retrying will not help; a fallback strategy might
 		}
 		if attempt < retries {
 			r.warn(idx, fmt.Sprintf("retrying %s: %v", rawURL, err), nil)
 		}
 	}
 	return fetch.Response{}, lastErr
+}
+
+// acquire obtains one logical page using the source's acquisition
+// strategies, falling back to the next strategy only when the failure is one
+// a different strategy might overcome. Every attempt is recorded as an
+// AcquisitionAttempt event. The page counts once in PagesAttempted however
+// many strategies are tried.
+func (r *run) acquire(ctx context.Context, idx int, p *extract.Profile, st *state, t task) (fetch.Response, error) {
+	start := st.Strategy
+	if start >= len(p.Strategies) {
+		start = 0
+	}
+	var failures []string
+	var lastErr error
+	for i := start; i < len(p.Strategies); i++ {
+		strategy := p.Strategies[i]
+		began := r.e.opts.Now()
+		resp, err := r.attempt(ctx, idx, p, strategy, t)
+		if ctx.Err() != nil {
+			return fetch.Response{}, ctx.Err()
+		}
+		result := fetch.Describe(err)
+		data := map[string]any{
+			"strategy": strategy.Type, "url": t.URL, "kind": t.Kind, "ok": err == nil, "result": result,
+			"fallback": i > start, "durationMs": r.e.opts.Now().Sub(began).Milliseconds(),
+		}
+		if t.Page > 0 {
+			data["page"] = t.Page
+		}
+		var se *fetch.StatusError
+		if errors.As(err, &se) {
+			data["status"] = se.Code
+		} else if resp.StatusCode != 0 {
+			data["status"] = resp.StatusCode
+		}
+		if err != nil {
+			data["error"] = err.Error()
+		} else {
+			data["finalUrl"], data["bytes"] = resp.URL, len(resp.Body)
+			if resp.Title != "" {
+				data["title"] = resp.Title
+			}
+		}
+		first := i == start
+		msg := fmt.Sprintf("%s: %s", strategyLabel(strategy.Type, i > start), result)
+		r.srcEvent(idx, contracts.EventAcquisitionAttempt, msg, data, func(sp *contracts.SourceProgress) {
+			if first {
+				sp.PagesAttempted++
+			}
+			if i < len(sp.Acquisition) {
+				a := &sp.Acquisition[i]
+				a.Attempts++
+				a.LastResult = result
+				if err == nil {
+					a.Succeeded++
+				} else {
+					a.Failed++
+				}
+			}
+		})
+		if err == nil {
+			if i != st.Strategy {
+				st.Strategy = i
+				r.warn(idx, fmt.Sprintf("%s failed (%s); using %s for the rest of this source",
+					p.Strategies[start].Type, failures[0], strategy.Type), nil)
+			}
+			return resp, nil
+		}
+		failures = append(failures, fmt.Sprintf("%s: %s", strategy.Type, result))
+		lastErr = err
+		if !fetch.FallbackEligible(err) {
+			break
+		}
+	}
+	r.srcEvent(idx, contracts.EventError, fmt.Sprintf("could not acquire %s page: %s", t.Kind, strings.Join(failures, "; ")),
+		map[string]any{"url": t.URL, "stage": contracts.StageAcquisition}, func(sp *contracts.SourceProgress) {
+			sp.PagesFailed++
+		})
+	return fetch.Response{}, &acquisitionError{summary: strings.Join(failures, "; "), last: lastErr}
+}
+
+// acquisitionError summarises every failed strategy for one page.
+type acquisitionError struct {
+	summary string
+	last    error
+}
+
+func (e *acquisitionError) Error() string { return e.summary }
+func (e *acquisitionError) Unwrap() error { return e.last }
+
+func strategyLabel(typ string, fallback bool) string {
+	label := map[string]string{"http": "HTTP", "browser": "Browser"}[typ]
+	if label == "" {
+		label = typ
+	}
+	if fallback {
+		label += " fallback"
+	}
+	return label
+}
+
+// attempt runs one strategy once (HTTP keeps its own retries for transient
+// errors). Challenge pages count as failures for every strategy.
+func (r *run) attempt(ctx context.Context, idx int, p *extract.Profile, s contracts.AcquisitionStrategy, t task) (fetch.Response, error) {
+	defer func() {
+		r.mu.Lock()
+		r.lastFetch = r.e.opts.Now()
+		r.mu.Unlock()
+	}()
+	switch s.Type {
+	case "browser":
+		if r.e.opts.Browser == nil {
+			return fetch.Response{}, errors.New("browser acquisition is not configured in this runtime")
+		}
+		timeout := time.Duration(s.TimeoutS) * time.Second
+		req := fetch.BrowserRequest{URL: t.URL, WaitUntil: s.WaitUntil, Timeout: timeout}
+		if t.Kind == taskListing {
+			req.WaitFor = s.WaitFor // detail pages do not contain listing items
+		}
+		return r.e.opts.Browser.Load(ctx, req)
+	default:
+		resp, err := r.fetch(ctx, idx, p, t.URL)
+		if err == nil {
+			if m := fetch.DetectBlock(resp.Body); m != "" {
+				return resp, &fetch.BlockedError{URL: t.URL, Status: resp.StatusCode, Marker: m}
+			}
+		}
+		return resp, err
+	}
 }
 
 func (r *run) process(ctx context.Context, idx int, p *extract.Profile, st *state, t task) {
@@ -133,21 +270,24 @@ func (r *run) process(ctx context.Context, idx int, p *extract.Profile, st *stat
 }
 
 func (r *run) processListing(ctx context.Context, idx int, p *extract.Profile, st *state, t task) {
-	resp, err := r.fetch(ctx, idx, p, t.URL)
+	resp, err := r.acquire(ctx, idx, p, st, t)
 	if ctx.Err() != nil {
 		return
 	}
 	if err != nil {
 		if st.ListingPages == 0 {
-			st.Failed = true
+			r.failSource(idx, st, contracts.StageAcquisition, fmt.Sprintf("could not acquire listing page 1 (%v)", err))
 		}
-		r.srcEvent(idx, contracts.EventError, fmt.Sprintf("listing page %d: %v", t.Page, err), map[string]any{"url": t.URL}, nil)
 		return
 	}
 	st.ListingPages++
 	page, err := p.ParsePage(resp.URL, resp.Body)
 	if err != nil {
-		r.srcEvent(idx, contracts.EventError, fmt.Sprintf("listing page %d: %v", t.Page, err), map[string]any{"url": t.URL}, nil)
+		r.srcEvent(idx, contracts.EventError, fmt.Sprintf("listing page %d: %v", t.Page, err),
+			map[string]any{"url": t.URL, "stage": contracts.StageExtraction}, nil)
+		if st.ListingPages == 1 {
+			r.failSource(idx, st, contracts.StageExtraction, fmt.Sprintf("listing page 1 was acquired but could not be parsed (%v)", err))
+		}
 		return
 	}
 	items, skipped := p.Items(page)
@@ -295,7 +435,7 @@ func (r *run) pageTotal(p *extract.Profile, page *extract.Page) int {
 }
 
 func (r *run) processDetail(ctx context.Context, idx int, p *extract.Profile, st *state, t task) {
-	resp, err := r.fetch(ctx, idx, p, t.URL)
+	resp, err := r.acquire(ctx, idx, p, st, t)
 	if ctx.Err() != nil {
 		return
 	}

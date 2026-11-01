@@ -207,3 +207,13 @@ td { font-variant-numeric: tabular-nums; }
 .workflow { margin: 20px 0; padding-left: 22px; line-height: 1.9; }
 .demo-hint { margin: -4px 0 16px; }
 button.link { border: 0; padding: 0; background: none; color: var(--info); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+
+.diagnostics { display: grid; gap: 10px; margin: 14px 0 4px; }
+.diag { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font-size: 13px; }
+.diag dl { display: grid; grid-template-columns: 96px 1fr; gap: 4px 12px; margin: 8px 0 0; }
+.diag dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding-top: 2px; }
+.diag dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.diag p { margin: 8px 0 0; }
+.attempt.ok { color: var(--ok); }
+.attempt.bad { color: var(--bad); }
+.log .AcquisitionAttempt b { color: var(--bad); }

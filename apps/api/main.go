@@ -21,6 +21,7 @@ import (
 	"github.com/kevinwolrath/prompt-driven-scraper/ai"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/demosite"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/engine"
+	"github.com/kevinwolrath/prompt-driven-scraper/internal/fetch/browser"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/profile"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/session"
 	"github.com/kevinwolrath/prompt-driven-scraper/internal/storage"
@@ -63,7 +64,10 @@ func main() {
 		}()
 	}
 
-	eng := engine.New(store, engine.Options{})
+	// The browser starts only if a source's acquisition strategies need it.
+	br := browser.New(browser.OptionsFromEnv())
+	defer br.Close()
+	eng := engine.New(store, engine.Options{Browser: br})
 	recovered, err := eng.Recover(ctx)
 	if err != nil {
 		log.Fatalf("recover runs: %v", err)
@@ -102,6 +106,7 @@ func main() {
 		log.Println("shutdown:", err)
 	}
 	_ = httpSrv.Close() // also ends open event streams
+	br.Close()
 	if err := closeStore(); err != nil {
 		log.Println("close storage:", err)
 	}

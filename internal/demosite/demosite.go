@@ -89,6 +89,16 @@ func Handler(opts Options) http.Handler {
 		sleep(r, opts.Latency)
 		detail(w, r)
 	})
+	mux.HandleFunc("GET /demo/protected/cars", func(w http.ResponseWriter, r *http.Request) {
+		sleep(r, opts.Latency)
+		protected(w, r)
+	})
+	mux.HandleFunc("GET /demo/challenge/cars", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `<!doctype html><html><head><title>Just a moment...</title></head>
+<body><div id="cf-chl-widget-demo">Checking your browser before accessing the site.</div></body></html>`)
+	})
 	mux.HandleFunc("GET /demo/api/evs", func(w http.ResponseWriter, r *http.Request) {
 		sleep(r, opts.Latency)
 		api(w, r)
@@ -296,6 +306,43 @@ func apiItem(c Car) map[string]any {
 		}
 	}
 	return item
+}
+
+// protected behaves like a site that refuses plain HTTP clients but serves
+// browsers, and renders its listings with JavaScript: plain HTTP gets 403,
+// and even the raw HTML contains no listing elements. Browsers send
+// Sec-Fetch-Mode on navigations; Go's HTTP client does not.
+func protected(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Sec-Fetch-Mode") == "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, "<!doctype html><title>Forbidden</title><p>Automated requests are not allowed.</p>")
+		return
+	}
+	var items []map[string]any
+	for _, c := range inventory(r.URL.Query().Get("fuel")) {
+		if c.Price == 0 {
+			continue
+		}
+		items = append(items, map[string]any{"id": c.ID, "title": c.Title(), "make": c.Make, "model": c.Model,
+			"year": c.Year, "price": money(c.Price), "km": km(c.Km), "location": c.Location})
+	}
+	data, _ := json.Marshal(items)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Demo Motors (protected)</title></head>
+<body><main id="results">Loading…</main>
+<script>
+const cars = %s;
+setTimeout(() => {
+  document.getElementById("results").innerHTML = cars.map(c =>
+    '<article class="listing-card" data-id="' + c.id + '">' +
+    '<h2><a class="details" href="/demo/cars/' + c.id + '">' + c.title + '</a></h2>' +
+    '<span class="make">' + c.make + '</span> <span class="model">' + c.model + '</span> ' +
+    '<span class="year">' + c.year + '</span> <span class="price">' + c.price + '</span> ' +
+    '<span class="odometer">' + c.km + '</span> <span class="location">' + c.location + '</span></article>'
+  ).join("");
+}, 200);
+</script></body></html>`, data)
 }
 
 func money(n int) string {

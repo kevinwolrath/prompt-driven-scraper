@@ -47,6 +47,9 @@ func (e *ValidationError) Error() string {
 
 type Options struct {
 	Fetcher fetch.Fetcher
+	// Browser serves "browser" acquisition strategies. Nil means sources
+	// that need one fail with a clear error.
+	Browser fetch.Browser
 	// DefaultDelay between requests to one source when a profile does not set
 	// limits.delayMs.
 	DefaultDelay time.Duration
@@ -125,9 +128,11 @@ func (e *Engine) SubmitRun(ctx context.Context, def contracts.JobDefinition, met
 		Progress:   contracts.Progress{SourcesTotal: len(def.SearchSources)},
 	}
 	for i, ref := range def.SearchSources {
-		job.Progress.Sources = append(job.Progress.Sources, contracts.SourceProgress{
-			ID: ref.ID, Name: compiled[i].Source.Name, Status: contracts.SourcePending,
-		})
+		sp := contracts.SourceProgress{ID: ref.ID, Name: compiled[i].Source.Name, Status: contracts.SourcePending}
+		for _, st := range compiled[i].Strategies {
+			sp.Acquisition = append(sp.Acquisition, contracts.AcquisitionStats{Strategy: st.Type})
+		}
+		job.Progress.Sources = append(job.Progress.Sources, sp)
 	}
 	if err := e.store.CreateJob(ctx, job); err != nil {
 		return contracts.Job{}, err

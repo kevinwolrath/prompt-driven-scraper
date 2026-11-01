@@ -20,6 +20,7 @@ type Response struct {
 	URL        string // final URL after redirects
 	StatusCode int
 	Body       []byte
+	Title      string // browser only
 }
 
 type Fetcher interface {
@@ -76,6 +77,9 @@ func (h *HTTP) Fetch(ctx context.Context, req Request) (Response, error) {
 		return Response{}, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		if m := DetectBlock(body); m != "" {
+			return Response{}, &BlockedError{URL: req.URL, Status: resp.StatusCode, Marker: m}
+		}
 		return Response{}, &StatusError{URL: req.URL, Code: resp.StatusCode}
 	}
 	return Response{URL: resp.Request.URL.String(), StatusCode: resp.StatusCode, Body: body}, nil

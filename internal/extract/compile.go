@@ -35,6 +35,8 @@ type Profile struct {
 	TotalPages   *Rule
 	// Fields in sorted name order for deterministic evaluation.
 	Fields []*Rule
+	// Strategies are the acquisition strategies in order; never empty.
+	Strategies []contracts.AcquisitionStrategy
 }
 
 // Rule is a compiled FieldRule.
@@ -85,6 +87,7 @@ func Compile(p contracts.SourceProfile) (*Profile, Issues) {
 			issues.Errorf(path+".unmapped", "unmapped must be omit, pass or fail")
 		}
 	}
+	c.Strategies = compileAcquisition(p.Acquisition, c.Format, &issues)
 	if p.Limits.MaxPages < 0 || p.Limits.MaxRecords < 0 {
 		issues.Errorf("limits", "limits must not be negative")
 	}
@@ -162,6 +165,50 @@ func Compile(p contracts.SourceProfile) (*Profile, Issues) {
 		return nil, issues
 	}
 	return c, issues
+}
+
+// compileAcquisition validates acquisition strategies; none means plain HTTP.
+func compileAcquisition(a *contracts.Acquisition, format string, issues *Issues) []contracts.AcquisitionStrategy {
+	if a == nil {
+		return []contracts.AcquisitionStrategy{{Type: "http"}}
+	}
+	if len(a.Strategies) == 0 {
+		issues.Errorf("acquisition.strategies", "list at least one strategy (http or browser), or omit acquisition for plain HTTP")
+	}
+	seen := map[string]bool{}
+	for i, st := range a.Strategies {
+		path := fmt.Sprintf("acquisition.strategies[%d]", i)
+		switch st.Type {
+		case "http":
+			if st.WaitUntil != "" || st.WaitFor != "" {
+				issues.Errorf(path, "waitUntil and waitFor only apply to browser strategies")
+			}
+		case "browser":
+			if format == "json" {
+				issues.Errorf(path+".type", "browser acquisition returns rendered HTML; it cannot be used with format: json")
+			}
+			switch st.WaitUntil {
+			case "", "load", "domcontentloaded":
+			default:
+				issues.Errorf(path+".waitUntil", "waitUntil must be load or domcontentloaded, got %q", st.WaitUntil)
+			}
+			if st.WaitFor != "" {
+				if _, err := cascadia.Compile(st.WaitFor); err != nil {
+					issues.Errorf(path+".waitFor", "invalid CSS selector: %v", err)
+				}
+			}
+		default:
+			issues.Errorf(path+".type", "type must be http or browser, got %q", st.Type)
+		}
+		if seen[st.Type] {
+			issues.Errorf(path+".type", "strategy %q is listed twice", st.Type)
+		}
+		seen[st.Type] = true
+		if st.TimeoutS < 0 {
+			issues.Errorf(path+".timeoutSeconds", "timeoutSeconds must not be negative")
+		}
+	}
+	return a.Strategies
 }
 
 // compileRule compiles a FieldRule. contextual rules (detailLink, next,
