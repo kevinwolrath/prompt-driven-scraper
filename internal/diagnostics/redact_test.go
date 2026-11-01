@@ -37,3 +37,16 @@ func TestReportKeepsInternalSessionIDButRedactsQueryCredentials(t *testing.T) {
 		}
 	}
 }
+func TestReportIncludesRedactedBrowserInteractionHistory(t *testing.T) {
+	j := contracts.Job{Definition: contracts.JobDefinition{Name: "interaction", BrowserMode: "user-browser"}, Progress: contracts.Progress{Interaction: &contracts.BrowserInteraction{URL: "https://public.example/?token=private-token", Title: "Challenge", Reason: "manual action required", TabID: "tab-id"}}}
+	events := []contracts.Event{{Type: contracts.EventBrowserInteractionRequired, Message: "manual action required", Data: map[string]any{"url": "https://public.example/?token=private-token"}}, {Type: contracts.EventBrowserInteractionResumed, Message: "Continue requested"}}
+	r := Report(j, events)
+	for _, want := range []string{"Browser mode: user-browser", "Browser interaction required", "BrowserInteractionRequired", "BrowserInteractionResumed"} {
+		if !strings.Contains(r, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	if strings.Contains(r, "private-token") {
+		t.Fatal("interaction URL credential leaked")
+	}
+}

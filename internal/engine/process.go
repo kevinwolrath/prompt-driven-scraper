@@ -138,6 +138,15 @@ func (r *run) fetch(ctx context.Context, idx int, p *extract.Profile, rawURL str
 // many strategies are tried.
 func (r *run) acquire(ctx context.Context, idx int, p *extract.Profile, st *state, t task) (fetch.Response, error) {
 	start := st.Strategy
+	continuing := st.ContinueBrowser
+	if st.Interaction != nil {
+		for i, s := range p.Strategies {
+			if s.Type == "user-browser" {
+				start = i
+				break
+			}
+		}
+	}
 	if start >= len(p.Strategies) {
 		start = 0
 	}
@@ -146,14 +155,19 @@ func (r *run) acquire(ctx context.Context, idx int, p *extract.Profile, st *stat
 	for i := start; i < len(p.Strategies); i++ {
 		strategy := p.Strategies[i]
 		began := r.e.opts.Now()
-		resp, err := r.attempt(ctx, idx, p, strategy, t)
+		resp, err := r.attempt(ctx, idx, p, strategy, st, t)
 		if ctx.Err() != nil {
 			return fetch.Response{}, ctx.Err()
 		}
+		var interaction *fetch.InteractionRequired
+		needsInteraction := errors.As(err, &interaction)
 		result := fetch.Describe(err)
 		data := map[string]any{
 			"strategy": strategy.Type, "url": t.URL, "kind": t.Kind, "ok": err == nil, "result": result,
-			"fallback": i > start, "durationMs": r.e.opts.Now().Sub(began).Milliseconds(),
+			"interactionRequired": needsInteraction, "continued": continuing, "fallback": i > start, "durationMs": r.e.opts.Now().Sub(began).Milliseconds(),
+		}
+		if marker := fetch.DetectBlock(resp.Body); marker != "" {
+			data["blockMarker"] = marker
 		}
 		if t.Page > 0 {
 			data["page"] = t.Page
@@ -176,7 +190,8 @@ func (r *run) acquire(ctx context.Context, idx int, p *extract.Profile, st *stat
 				data["title"] = resp.Title
 			}
 		}
-		first := i == start
+		first := !st.PageAttempted
+		st.PageAttempted = true
 		msg := fmt.Sprintf("%s: %s", strategyLabel(strategy.Type, i > start), result)
 		r.srcEvent(idx, contracts.EventAcquisitionAttempt, msg, data, func(sp *contracts.SourceProgress) {
 			if first {
@@ -188,11 +203,23 @@ func (r *run) acquire(ctx context.Context, idx int, p *extract.Profile, st *stat
 				a.LastResult = result
 				if err == nil {
 					a.Succeeded++
+				} else if needsInteraction {
+					a.Interactions++
 				} else {
 					a.Failed++
 				}
 			}
 		})
+		if needsInteraction {
+			st.Interaction = &contracts.BrowserInteraction{URL: t.URL, Title: resp.Title, Reason: interaction.Reason, TabID: interaction.TabID, SourceID: r.job.Definition.SearchSources[idx].ID}
+			st.ContinueBrowser = false
+			st.Strategy = i
+			return resp, err
+		}
+		if continuing {
+			st.Interaction = nil
+			st.ContinueBrowser = false
+		}
 		if err == nil {
 			if i != st.Strategy {
 				st.Strategy = i
@@ -224,7 +251,7 @@ func (e *acquisitionError) Error() string { return e.summary }
 func (e *acquisitionError) Unwrap() error { return e.last }
 
 func strategyLabel(typ string, fallback bool) string {
-	label := map[string]string{"http": "HTTP", "browser": "Browser"}[typ]
+	label := map[string]string{"http": "HTTP", "browser": "Browser", "user-browser": "User Browser"}[typ]
 	if label == "" {
 		label = typ
 	}
@@ -236,23 +263,30 @@ func strategyLabel(typ string, fallback bool) string {
 
 // attempt runs one strategy once (HTTP keeps its own retries for transient
 // errors). Challenge pages count as failures for every strategy.
-func (r *run) attempt(ctx context.Context, idx int, p *extract.Profile, s contracts.AcquisitionStrategy, t task) (fetch.Response, error) {
+func (r *run) attempt(ctx context.Context, idx int, p *extract.Profile, s contracts.AcquisitionStrategy, st *state, t task) (fetch.Response, error) {
 	defer func() {
 		r.mu.Lock()
 		r.lastFetch = r.e.opts.Now()
 		r.mu.Unlock()
 	}()
 	switch s.Type {
-	case "browser":
-		if r.e.opts.Browser == nil {
+	case "browser", "user-browser":
+		br := r.e.opts.Browser
+		if s.Type == "user-browser" {
+			br = r.e.opts.UserBrowser
+		}
+		if br == nil {
 			return fetch.Response{}, errors.New("browser acquisition is not configured in this runtime")
 		}
 		timeout := time.Duration(s.TimeoutS) * time.Second
-		req := fetch.BrowserRequest{URL: t.URL, WaitUntil: s.WaitUntil, Timeout: timeout}
+		req := fetch.BrowserRequest{URL: t.URL, WaitUntil: s.WaitUntil, Timeout: timeout, Key: r.job.ID + ":" + r.job.Definition.SearchSources[idx].ID, Continue: st.ContinueBrowser}
+		if st.Interaction != nil {
+			req.TabID = st.Interaction.TabID
+		}
 		if t.Kind == taskListing {
 			req.WaitFor = s.WaitFor // detail pages do not contain listing items
 		}
-		return r.e.opts.Browser.Load(ctx, req)
+		return br.Load(ctx, req)
 	default:
 		resp, err := r.fetch(ctx, idx, p, t.URL)
 		if err == nil {
@@ -279,6 +313,9 @@ func (r *run) processListing(ctx context.Context, idx int, p *extract.Profile, s
 		return
 	}
 	if err != nil {
+		if st.Interaction != nil {
+			return
+		}
 		if st.ListingPages == 0 {
 			r.failSource(idx, st, contracts.StageAcquisition, fmt.Sprintf("could not acquire listing page 1 (%v)", err))
 		}
@@ -446,6 +483,9 @@ func (r *run) processDetail(ctx context.Context, idx int, p *extract.Profile, st
 		return
 	}
 	if err != nil {
+		if st.Interaction != nil {
+			return
+		}
 		r.warn(idx, fmt.Sprintf("detail page failed, using listing values: %v", err), map[string]any{"url": t.URL})
 		r.finishRecord(idx, p, st, t.Item, nil, true)
 		return

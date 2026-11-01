@@ -49,7 +49,8 @@ type Options struct {
 	Fetcher fetch.Fetcher
 	// Browser serves "browser" acquisition strategies. Nil means sources
 	// that need one fail with a clear error.
-	Browser fetch.Browser
+	Browser     fetch.Browser
+	UserBrowser fetch.Browser
 	// DefaultDelay between requests to one source when a profile does not set
 	// limits.delayMs.
 	DefaultDelay time.Duration
@@ -267,6 +268,12 @@ func (e *Engine) Recover(ctx context.Context) ([]string, error) {
 			return changed, fmt.Errorf("recover run %s: %w", job.ID, err)
 		}
 		_, cpErr := e.store.GetCheckpoint(ctx, job.ID)
+		var interaction *contracts.BrowserInteraction
+		if cpErr == nil {
+			if st, err := r.loadState(ctx); err == nil {
+				interaction = st.Interaction
+			}
+		}
 		r.mu.Lock()
 		was := r.job.Status
 		if was == contracts.JobQueued || cpErr != nil {
@@ -277,6 +284,7 @@ func (e *Engine) Recover(ctx context.Context) ([]string, error) {
 		} else {
 			// Not a normal transition: the process that was running it is gone.
 			r.job.Status = contracts.JobPaused
+			r.job.Progress.Interaction = interaction
 			r.job.StatusReason = fmt.Sprintf("interrupted while %s: the application stopped; resume continues from the last checkpoint", was)
 			r.emitLocked(contracts.EventJobPaused, "", r.job.StatusReason, map[string]any{"interrupted": true, "was": was}, nil)
 		}

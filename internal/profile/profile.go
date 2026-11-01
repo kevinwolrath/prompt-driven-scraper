@@ -100,6 +100,11 @@ func Resolve(ctx context.Context, def *contracts.JobDefinition, r Resolver) extr
 // profiles in search-source order when valid.
 func ValidateJob(def contracts.JobDefinition) ([]*extract.Profile, extract.Issues) {
 	var issues extract.Issues
+	switch def.BrowserMode {
+	case "", "automatic", "http", "browser", "user-browser":
+	default:
+		issues.Errorf("browserMode", "browserMode must be automatic, http, browser or user-browser")
+	}
 	if strings.TrimSpace(def.Name) == "" {
 		issues.Errorf("name", "name is required")
 	}
@@ -128,7 +133,24 @@ func ValidateJob(def contracts.JobDefinition) ([]*extract.Profile, extract.Issue
 			issues.Errorf(path+".id", "duplicate source id %q", ref.ID)
 		}
 		ids[ref.ID] = true
-		c, pIssues := extract.Compile(*ref.Profile)
+		effective := *ref.Profile
+		if def.BrowserMode != "" && def.BrowserMode != "automatic" {
+			strategy := contracts.AcquisitionStrategy{Type: def.BrowserMode}
+			if effective.Acquisition != nil && def.BrowserMode != "http" {
+				for _, candidate := range effective.Acquisition.Strategies {
+					if candidate.Type == "browser" || candidate.Type == "user-browser" {
+						strategy = candidate
+						strategy.Type = def.BrowserMode
+						break
+					}
+				}
+			}
+			if def.BrowserMode != "http" && strategy.WaitFor == "" {
+				strategy.WaitFor = effective.Listing.Items
+			}
+			effective.Acquisition = &contracts.Acquisition{Strategies: []contracts.AcquisitionStrategy{strategy}}
+		}
+		c, pIssues := extract.Compile(effective)
 		for _, is := range pIssues {
 			is.Path = path + ".profile." + is.Path
 			issues = append(issues, is)

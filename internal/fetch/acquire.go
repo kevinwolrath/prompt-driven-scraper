@@ -15,8 +15,15 @@ type Browser interface {
 	Load(ctx context.Context, req BrowserRequest) (Response, error)
 }
 
+type InteractionRequired struct{ TabID, Reason string }
+
+func (e *InteractionRequired) Error() string { return "browser interaction required: " + e.Reason }
+
 type BrowserRequest struct {
-	URL string
+	Key      string
+	TabID    string
+	Continue bool
+	URL      string
 	// WaitUntil is "load" (default) or "domcontentloaded".
 	WaitUntil string
 	// WaitFor is an optional CSS selector to wait for before reading the DOM.

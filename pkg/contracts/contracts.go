@@ -35,6 +35,7 @@ type JobDefinition struct {
 	Name          string           `json:"name" yaml:"name"`
 	QueryInput    string           `json:"queryInput" yaml:"queryInput"`
 	Query         Query            `json:"query,omitempty" yaml:"query,omitempty"`
+	BrowserMode   string           `json:"browserMode,omitempty" yaml:"browserMode,omitempty"`
 	SearchSources []SourceRef      `json:"searchSources" yaml:"searchSources"`
 	Output        OutputDefinition `json:"output" yaml:"output"`
 }
@@ -138,7 +139,7 @@ type Acquisition struct {
 }
 
 type AcquisitionStrategy struct {
-	// Type is "http" (plain GET) or "browser" (headless Chrome/Chromium).
+	// Type is "http", "browser" (managed Chrome), or "user-browser" (persistent visible Chrome).
 	Type string `json:"type" yaml:"type"`
 	// WaitUntil (browser): "load" (default) or "domcontentloaded".
 	WaitUntil string `json:"waitUntil,omitempty" yaml:"waitUntil,omitempty"`
@@ -257,10 +258,11 @@ const (
 
 // AcquisitionStats counts attempts of one acquisition strategy for a source.
 type AcquisitionStats struct {
-	Strategy  string `json:"strategy"`
-	Attempts  int    `json:"attempts"`
-	Succeeded int    `json:"succeeded"`
-	Failed    int    `json:"failed"`
+	Strategy     string `json:"strategy"`
+	Attempts     int    `json:"attempts"`
+	Succeeded    int    `json:"succeeded"`
+	Failed       int    `json:"failed"`
+	Interactions int    `json:"interactions,omitempty"`
 	// LastResult is a short description of the latest attempt, e.g.
 	// "HTTP 403 Forbidden", "page loaded", "bot challenge detected".
 	LastResult string `json:"lastResult,omitempty"`
@@ -300,20 +302,30 @@ type SourceProgress struct {
 }
 
 type Progress struct {
-	CurrentSource   string           `json:"currentSource,omitempty"`
-	SourcesTotal    int              `json:"sourcesTotal"`
-	SourcesComplete int              `json:"sourcesComplete"`
-	PagesAttempted  int              `json:"pagesAttempted"`
-	PagesVisited    int              `json:"pagesVisited"`
-	PagesDiscovered int              `json:"pagesDiscovered"`
-	RecordsFound    int              `json:"recordsFound"`
-	RecordsAccepted int              `json:"recordsAccepted"`
-	RecordsRejected int              `json:"recordsRejected"`
-	Duplicates      int              `json:"duplicates"`
-	Warnings        int              `json:"warnings"`
-	Errors          int              `json:"errors"`
-	ElapsedMs       int64            `json:"elapsedMs"`
-	Sources         []SourceProgress `json:"sources"`
+	Interaction     *BrowserInteraction `json:"interaction,omitempty"`
+	CurrentSource   string              `json:"currentSource,omitempty"`
+	SourcesTotal    int                 `json:"sourcesTotal"`
+	SourcesComplete int                 `json:"sourcesComplete"`
+	PagesAttempted  int                 `json:"pagesAttempted"`
+	PagesVisited    int                 `json:"pagesVisited"`
+	PagesDiscovered int                 `json:"pagesDiscovered"`
+	RecordsFound    int                 `json:"recordsFound"`
+	RecordsAccepted int                 `json:"recordsAccepted"`
+	RecordsRejected int                 `json:"recordsRejected"`
+	Duplicates      int                 `json:"duplicates"`
+	Warnings        int                 `json:"warnings"`
+	Errors          int                 `json:"errors"`
+	ElapsedMs       int64               `json:"elapsedMs"`
+	Sources         []SourceProgress    `json:"sources"`
+}
+
+// BrowserInteraction identifies a scraper-owned tab awaiting a human.
+type BrowserInteraction struct {
+	URL      string `json:"url"`
+	Title    string `json:"title,omitempty"`
+	Reason   string `json:"reason"`
+	TabID    string `json:"tabId"`
+	SourceID string `json:"sourceId"`
 }
 
 // Job is one execution. In product terms it is a Run: when SessionID is set
@@ -346,21 +358,23 @@ const (
 	EventPageDiscovered EventType = "PageDiscovered"
 	EventPageFetched    EventType = "PageFetched"
 	// EventAcquisitionAttempt records one strategy's attempt to obtain a page.
-	EventAcquisitionAttempt EventType = "AcquisitionAttempt"
-	EventRecordFound        EventType = "RecordFound"
-	EventRecordAccepted     EventType = "RecordAccepted"
-	EventRecordRejected     EventType = "RecordRejected"
-	EventWarning            EventType = "Warning"
-	EventError              EventType = "Error"
-	EventSourceCompleted    EventType = "SourceCompleted"
-	EventJobPausing         EventType = "JobPausing"
-	EventJobPaused          EventType = "JobPaused"
-	EventJobResumed         EventType = "JobResumed"
-	EventJobFinalising      EventType = "JobFinalising"
-	EventJobCompleted       EventType = "JobCompleted"
-	EventJobPartial         EventType = "JobPartial"
-	EventJobCancelled       EventType = "JobCancelled"
-	EventJobFailed          EventType = "JobFailed"
+	EventAcquisitionAttempt         EventType = "AcquisitionAttempt"
+	EventBrowserInteractionRequired EventType = "BrowserInteractionRequired"
+	EventBrowserInteractionResumed  EventType = "BrowserInteractionResumed"
+	EventRecordFound                EventType = "RecordFound"
+	EventRecordAccepted             EventType = "RecordAccepted"
+	EventRecordRejected             EventType = "RecordRejected"
+	EventWarning                    EventType = "Warning"
+	EventError                      EventType = "Error"
+	EventSourceCompleted            EventType = "SourceCompleted"
+	EventJobPausing                 EventType = "JobPausing"
+	EventJobPaused                  EventType = "JobPaused"
+	EventJobResumed                 EventType = "JobResumed"
+	EventJobFinalising              EventType = "JobFinalising"
+	EventJobCompleted               EventType = "JobCompleted"
+	EventJobPartial                 EventType = "JobPartial"
+	EventJobCancelled               EventType = "JobCancelled"
+	EventJobFailed                  EventType = "JobFailed"
 )
 
 // Event is an append-only job event document. Every event carries the job

@@ -61,6 +61,12 @@ func report(job contracts.Job, events []contracts.Event) string {
 		w("Finished: %s", job.FinishedAt.UTC().Format(time.RFC3339))
 	}
 	w("Query input: %q", job.Definition.QueryInput)
+	w("Browser mode: %s", nonEmpty(job.Definition.BrowserMode, "automatic"))
+	if p.Interaction != nil {
+		w("Browser interaction required: %s", p.Interaction.Reason)
+		w("Navigation URL: %s", p.Interaction.URL)
+		w("Page title: %s", p.Interaction.Title)
+	}
 	w("")
 	w("SUMMARY")
 	w("Sources: %d/%d", p.SourcesComplete, p.SourcesTotal)
@@ -126,7 +132,7 @@ func report(job contracts.Job, events []contracts.Event) string {
 			msg = ": " + msg
 		}
 		w("%s %s%s%s", ev.Timestamp.UTC().Format("15:04:05.000"), src, ev.Type, msg)
-		if ev.Type == contracts.EventAcquisitionAttempt {
+		if ev.Type == contracts.EventAcquisitionAttempt || ev.Type == contracts.EventBrowserInteractionRequired || ev.Type == contracts.EventBrowserInteractionResumed {
 			data, _ := json.Marshal(ev.Data)
 			w("  %s", data)
 		}
@@ -149,7 +155,7 @@ func writeSource(b *strings.Builder, s contracts.SourceProgress, events []contra
 			continue
 		}
 		used = true
-		label := map[string]string{"http": "HTTP", "browser": "Browser"}[a.Strategy]
+		label := map[string]string{"http": "HTTP", "browser": "Browser", "user-browser": "User Browser"}[a.Strategy]
 		if label == "" {
 			label = a.Strategy
 		}
@@ -157,7 +163,7 @@ func writeSource(b *strings.Builder, s contracts.SourceProgress, events []contra
 			label += " fallback"
 		}
 		result := a.LastResult
-		if a.Failed == 0 {
+		if a.Succeeded == a.Attempts {
 			result = "page loaded"
 		}
 		w("- %s: %s (%d of %d attempts succeeded)", label, result, a.Succeeded, a.Attempts)

@@ -371,3 +371,23 @@ they still need verifying.
 detail pages, finance-repayment traps, sponsored tiles, misleading meta tags) and
 [`examples/sources/demo-ev-api.source.yaml`](../examples/sources/demo-ev-api.source.yaml) (JSON API
 with a predicate path). Both run against the bundled demo site.
+## User Browser execution
+
+The optional job-level `browserMode` is `automatic` (default), `http`, `browser` (Managed Browser), or `user-browser` (visible persistent Chrome). It is an execution override for every source in the job and is included in immutable snapshots. `automatic` follows each profile's ordered acquisition strategies. For a source-specific interactive fallback, use:
+
+```yaml
+acquisition:
+  strategies:
+    - type: http
+    - type: browser
+      waitFor: "article.listing-card"
+    - type: user-browser
+      waitFor: "article.listing-card"
+      timeoutSeconds: 30
+```
+
+User Browser reads the same rendered HTML through the existing listing, mapping, filtering and persistence pipeline. It uses an operator-configured dedicated Chrome profile or an explicitly configured local debugging connection; profiles cannot select browser profile directories or debugging endpoints. It cannot be used for `format: json`.
+
+If a challenge or HTTP refusal appears, the run checkpoints as **paused / Browser interaction required**. The user must interact manually with Chrome, then press **Continue** in the run UI. Continue reads the retained tab without reloading or navigating it. Another interaction request requires another explicit Continue; there is no automatic challenge retry loop. Missing configured page state also requests inspection (the selector may be incorrect). If the user moved to another origin, return to the source before Continue. Cancel and Give me what you've got remain available.
+
+Do not promise that User Browser defeats access restrictions. Do not solve CAPTCHAs or implement challenge/stealth mechanisms. If the page stays blocked, record that evidence. See `docs/USER_BROWSER.md` for local Chrome setup, lifecycle and limitations.

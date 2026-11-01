@@ -43,7 +43,7 @@
             "additionalProperties": false,
             "required": ["type"],
             "properties": {
-              "type": { "enum": ["http", "browser"] },
+              "type": { "enum": ["http", "browser", "user-browser"] },
               "waitUntil": { "enum": ["load", "domcontentloaded"], "description": "browser only; default load" },
               "waitFor": { "type": "string", "description": "browser only: CSS selector to wait for on listing pages" },
               "timeoutSeconds": { "type": "integer", "minimum": 0 }

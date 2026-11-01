@@ -349,3 +349,7 @@ Until then `-store d1` fails at startup instead of pretending.
 ## Real-world verification
 
 See [the live Carsales/Autotrader report](docs/real-world/README.md) and reproducible configurations in [examples/real-world](examples/real-world). Carsales is access-blocked; Autotrader produced persisted, filtered vehicle records. Samples are bounded to one listing page.
+
+## Interactive Chrome
+
+Sessions now offer Automatic, HTTP, Managed Browser and User Browser execution. User Browser uses visible persistent Chrome, checkpoints when a website needs manual interaction, and offers Continue on the same tab. See [setup and lifecycle](docs/USER_BROWSER.md) and [live verification](docs/real-world/USER_BROWSER_VERIFICATION.md).

@@ -1,0 +1,201 @@
+Prompt Driven Scraper — Run Diagnostics
+
+SESSION
+Carsales VIC dealer Prius under $10k — User Browser
+id: ses-20261101-034138-6b4a7b7a
+
+RUN
+Run #2 (job-20261101-035614-f14210c0)
+Status: Paused
+Reason: browser interaction required
+Duration: 0s
+Started: 2026-11-01T03:56:14Z
+Query input: "Carsales VIC dealer Toyota Prius under $10k"
+Browser mode: user-browser
+Browser interaction required: captcha-delivery.com
+Navigation URL: https://www.carsales.com.au/cars/dealer/toyota/prius/victoria-state/under-10000/
+Page title: carsales.com.au
+
+SUMMARY
+Sources: 0/1
+Pages loaded/attempted: 0/1
+Records found: 0
+Accepted: 0
+Rejected: 0
+Duplicates: 0
+Warnings: 2
+Errors: 0
+
+SOURCE: Carsales
+id: carsales
+Status: Running
+
+Acquisition:
+- User Browser: browser interaction required: captcha-delivery.com (0 of 1 attempts succeeded)
+- Pages loaded: 0/1
+
+Extraction:
+- Not reached (no page acquired)
+
+Filtering:
+- Not reached
+
+
+JOB-LEVEL WARNINGS AND ERRORS
+- Warning: searchSources[0].profile.fields.priceType: field "priceType" is not in the output schema and will be ignored
+- Warning: searchSources[0].profile.fields: output field "title" has no mapping in source "carsales"; it will be empty
+
+CONFIGURATION (snapshot used by this run; source profiles inline; credentials redacted)
+name: Carsales VIC dealer Prius under $10k — User Browser
+queryInput: Carsales VIC dealer Toyota Prius under $10k
+query:
+    filters:
+        - field: make
+          op: eq
+          value: Toyota
+        - field: model
+          op: eq
+          value: Prius
+        - field: state
+          op: eq
+          value: VIC
+        - field: price
+          op: lt
+          value: 10000
+        - field: sellerType
+          op: eq
+          value: Dealer
+browserMode: user-browser
+searchSources:
+    - id: carsales
+      profile:
+        id: carsales
+        name: Carsales
+        format: html
+        request:
+            url: https://www.carsales.com.au/cars/dealer/toyota/prius/victoria-state/under-10000/
+        acquisition:
+            strategies:
+                - type: http
+                - type: browser
+                  waitUntil: domcontentloaded
+                  waitFor: article
+                  timeoutSeconds: 15
+        limits:
+            maxPages: 1
+            maxRecords: 50
+            delayMs: 1500
+            retries: 1
+            timeoutSeconds: 30
+        listing:
+            items: article
+            detailLink:
+                css: a[href*='/cars/details/']
+                attr: href
+            followDetail: true
+        ignore:
+            - header
+            - footer
+        fields:
+            kilometres:
+                candidates:
+                    - from: detail
+                      jsonld: mileageFromOdometer.value
+                      jsonldType: Car
+                    - css: '[class*=''odometer'']'
+                    - from: detail
+                      css: '[class*=''odometer'']'
+                transform:
+                    - number
+                    - integer
+            location:
+                candidates:
+                    - css: '[class*=''location'']'
+                    - from: detail
+                      css: '[class*=''location'']'
+            make:
+                const: Toyota
+            model:
+                const: Prius
+            price:
+                candidates:
+                    - from: detail
+                      jsonld: offers.price
+                      jsonldType: Car
+                    - from: detail
+                      css: '[class*=''price'']'
+                    - css: '[class*=''price'']'
+                reject:
+                    - contains: per week
+                    - contains: per month
+                    - contains: /wk
+                    - contains: /mth
+                    - max: 2000
+                prefer:
+                    - contains: drive away
+                transform:
+                    - currency
+                    - decimal
+            priceType:
+                candidates:
+                    - css: '[class*=''price'']'
+                    - from: detail
+                      css: '[class*=''price'']'
+            sellerType:
+                css: '[class*=''seller'']'
+            state:
+                const: VIC
+            url:
+                builtin: detailUrl
+            year:
+                candidates:
+                    - from: detail
+                      jsonld: vehicleModelDate
+                      jsonldType: Car
+                    - css: h3
+                transform:
+                    - regex: (\d{4})
+                    - integer
+        notes:
+            - Carsales may reject plain HTTP; browser acquisition is the permitted fallback.
+            - The Carsales search URL scopes results to Toyota Prius, Victoria and under $10,000.
+            - query.filters independently enforces the $10,000 ceiling.
+            - Listing and field CSS selectors require verification from Run Diagnostics.
+output:
+    format: json
+    fields:
+        - name: year
+          type: integer
+        - name: price
+          type: decimal
+          required: true
+        - name: sellerType
+          type: string
+        - name: location
+          type: string
+        - name: state
+          type: string
+          required: true
+        - name: make
+          type: string
+          required: true
+        - name: model
+          type: string
+          required: true
+        - name: kilometres
+          type: integer
+        - name: url
+          type: url
+          required: true
+        - name: title
+          type: string
+
+EVENT LOG (page discovery and per-record found/accepted events omitted)
+03:56:14.369 Warning: searchSources[0].profile.fields.priceType: field "priceType" is not in the output schema and will be ignored
+03:56:14.370 Warning: searchSources[0].profile.fields: output field "title" has no mapping in source "carsales"; it will be empty
+03:56:14.370 JobStarted
+03:56:14.371 [carsales] SourceStarted: Carsales
+03:56:14.727 [carsales] AcquisitionAttempt: User Browser: browser interaction required: captcha-delivery.com
+  {"blockMarker":"captcha-delivery.com","bytes":1558,"continued":false,"durationMs":355,"error":"browser interaction required: captcha-delivery.com","fallback":false,"finalUrl":"https://www.carsales.com.au/cars/dealer/toyota/prius/victoria-state/under-10000/","interactionRequired":true,"kind":"listing","ok":false,"page":1,"result":"browser interaction required: captcha-delivery.com","status":403,"strategy":"user-browser","title":"carsales.com.au","url":"https://www.carsales.com.au/cars/dealer/toyota/prius/victoria-state/under-10000/"}
+03:56:14.728 [carsales] BrowserInteractionRequired: captcha-delivery.com
+  {"tabId":"F9B12D9B6AA062291ECCB7265DADC637","title":"carsales.com.au","url":"https://www.carsales.com.au/cars/dealer/toyota/prius/victoria-state/under-10000/"}
