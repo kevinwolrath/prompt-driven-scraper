@@ -1,0 +1,188 @@
+{
+  "name": "Autotrader VIC dealer Toyota Prius under $10k",
+  "queryInput": "Autotrader VIC dealer Toyota Prius under $10k",
+  "query": {
+    "filters": [
+      {
+        "field": "make",
+        "op": "eq",
+        "value": "Toyota"
+      },
+      {
+        "field": "model",
+        "op": "eq",
+        "value": "Prius"
+      },
+      {
+        "field": "state",
+        "op": "eq",
+        "value": "VIC"
+      },
+      {
+        "field": "price",
+        "op": "lt",
+        "value": 10000
+      },
+      {
+        "field": "sellerType",
+        "op": "eq",
+        "value": "Dealer"
+      }
+    ]
+  },
+  "searchSources": [
+    {
+      "id": "autotrader-public",
+      "profile": {
+        "id": "autotrader-public",
+        "name": "Autotrader Australia public listings",
+        "format": "html",
+        "request": {
+          "url": "https://www.autotrader.com.au/for-sale/used/toyota/prius/vic"
+        },
+        "limits": {
+          "maxPages": 1,
+          "maxRecords": 100,
+          "delayMs": 1500,
+          "retries": 0,
+          "timeoutSeconds": 30
+        },
+        "listing": {
+          "items": "section.carListing--wrapper"
+        },
+        "fields": {
+          "kilometres": {
+            "css": ".carListing--mileage",
+            "transform": [
+              "number",
+              "integer"
+            ]
+          },
+          "location": {
+            "css": ".carListing--location"
+          },
+          "make": {
+            "css": "a.carListing",
+            "attr": "href",
+            "transform": [
+              {
+                "regex": "/car/[^/]+/([^/]+)/"
+              },
+              "trim"
+            ]
+          },
+          "model": {
+            "css": "a.carListing",
+            "attr": "href",
+            "transform": [
+              {
+                "regex": "/car/[^/]+/[^/]+/([^/]+)/"
+              },
+              "trim"
+            ]
+          },
+          "price": {
+            "css": ".carListingPrice--advertisedPrice",
+            "transform": [
+              "currency",
+              "decimal"
+            ]
+          },
+          "sellerType": {
+            "css": ".carListing--adType",
+            "transform": [
+              {
+                "regex": "^([^:]+):"
+              },
+              "trim"
+            ]
+          },
+          "state": {
+            "css": ".carListing--location",
+            "transform": [
+              {
+                "regex": ",\\s*([A-Z]+)$"
+              },
+              "upper"
+            ]
+          },
+          "title": {
+            "css": "h2.carListing--title"
+          },
+          "url": {
+            "css": "a.carListing",
+            "attr": "href",
+            "transform": [
+              "absoluteUrl"
+            ]
+          },
+          "year": {
+            "css": "h2.carListing--title",
+            "transform": [
+              {
+                "regex": "^(\\d{4})"
+              },
+              "integer"
+            ]
+          }
+        },
+        "notes": [
+          "Verified against public server-rendered HTML on 2026-11-01. No browser required.",
+          "Extract advertised price only; previous prices and finance values are excluded.",
+          "Make and model come from each listing URL; state and seller type come from each card.",
+          "Bounded first-page sample. This profile does not claim to exhaust the search."
+        ]
+      }
+    }
+  ],
+  "output": {
+    "format": "json",
+    "fields": [
+      {
+        "name": "year",
+        "type": "integer"
+      },
+      {
+        "name": "price",
+        "type": "decimal",
+        "required": true
+      },
+      {
+        "name": "sellerType",
+        "type": "string"
+      },
+      {
+        "name": "location",
+        "type": "string"
+      },
+      {
+        "name": "state",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "make",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "kilometres",
+        "type": "integer"
+      },
+      {
+        "name": "url",
+        "type": "url",
+        "required": true
+      },
+      {
+        "name": "title",
+        "type": "string"
+      }
+    ]
+  }
+}

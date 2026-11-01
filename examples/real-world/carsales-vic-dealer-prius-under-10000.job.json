@@ -1,0 +1,253 @@
+{
+  "name": "Carsales VIC dealer Toyota Prius under $10k",
+  "queryInput": "Carsales VIC dealer Toyota Prius under $10k",
+  "query": {
+    "filters": [
+      {
+        "field": "make",
+        "op": "eq",
+        "value": "Toyota"
+      },
+      {
+        "field": "model",
+        "op": "eq",
+        "value": "Prius"
+      },
+      {
+        "field": "state",
+        "op": "eq",
+        "value": "VIC"
+      },
+      {
+        "field": "price",
+        "op": "lt",
+        "value": 10000
+      },
+      {
+        "field": "sellerType",
+        "op": "eq",
+        "value": "Dealer"
+      }
+    ]
+  },
+  "searchSources": [
+    {
+      "id": "carsales",
+      "profile": {
+        "id": "carsales",
+        "name": "Carsales",
+        "format": "html",
+        "request": {
+          "url": "https://www.carsales.com.au/cars/dealer/toyota/prius/victoria-state/under-10000/"
+        },
+        "acquisition": {
+          "strategies": [
+            {
+              "type": "http"
+            },
+            {
+              "type": "browser",
+              "waitUntil": "domcontentloaded",
+              "waitFor": "article",
+              "timeoutSeconds": 12
+            }
+          ]
+        },
+        "limits": {
+          "maxPages": 1,
+          "maxRecords": 50,
+          "delayMs": 1500,
+          "retries": 1,
+          "timeoutSeconds": 30
+        },
+        "listing": {
+          "items": "article",
+          "detailLink": {
+            "css": "a[href*='/cars/details/']",
+            "attr": "href"
+          },
+          "followDetail": true
+        },
+        "ignore": [
+          "header",
+          "footer"
+        ],
+        "fields": {
+          "kilometres": {
+            "candidates": [
+              {
+                "from": "detail",
+                "jsonld": "mileageFromOdometer.value",
+                "jsonldType": "Car"
+              },
+              {
+                "css": "[class*='odometer']"
+              },
+              {
+                "from": "detail",
+                "css": "[class*='odometer']"
+              }
+            ],
+            "transform": [
+              "number",
+              "integer"
+            ]
+          },
+          "location": {
+            "candidates": [
+              {
+                "css": "[class*='location']"
+              },
+              {
+                "from": "detail",
+                "css": "[class*='location']"
+              }
+            ]
+          },
+          "make": {
+            "const": "Toyota"
+          },
+          "model": {
+            "const": "Prius"
+          },
+          "price": {
+            "candidates": [
+              {
+                "from": "detail",
+                "jsonld": "offers.price",
+                "jsonldType": "Car"
+              },
+              {
+                "from": "detail",
+                "css": "[class*='price']"
+              },
+              {
+                "css": "[class*='price']"
+              }
+            ],
+            "reject": [
+              {
+                "contains": "per week"
+              },
+              {
+                "contains": "per month"
+              },
+              {
+                "contains": "/wk"
+              },
+              {
+                "contains": "/mth"
+              },
+              {
+                "max": 2000
+              }
+            ],
+            "prefer": [
+              {
+                "contains": "drive away"
+              }
+            ],
+            "transform": [
+              "currency",
+              "decimal"
+            ]
+          },
+          "priceType": {
+            "candidates": [
+              {
+                "css": "[class*='price']"
+              },
+              {
+                "from": "detail",
+                "css": "[class*='price']"
+              }
+            ]
+          },
+          "sellerType": {
+            "css": "[class*='seller']"
+          },
+          "state": {
+            "const": "VIC"
+          },
+          "url": {
+            "builtin": "detailUrl"
+          },
+          "year": {
+            "candidates": [
+              {
+                "from": "detail",
+                "jsonld": "vehicleModelDate",
+                "jsonldType": "Car"
+              },
+              {
+                "css": "h3"
+              }
+            ],
+            "transform": [
+              {
+                "regex": "(\\d{4})"
+              },
+              "integer"
+            ]
+          }
+        },
+        "notes": [
+          "Carsales may reject plain HTTP; browser acquisition is the permitted fallback.",
+          "The Carsales search URL scopes results to Toyota Prius, Victoria and under $10,000.",
+          "query.filters independently enforces the $10,000 ceiling.",
+          "Listing and field CSS selectors require verification from Run Diagnostics."
+        ]
+      }
+    }
+  ],
+  "output": {
+    "format": "json",
+    "fields": [
+      {
+        "name": "year",
+        "type": "integer"
+      },
+      {
+        "name": "price",
+        "type": "decimal",
+        "required": true
+      },
+      {
+        "name": "sellerType",
+        "type": "string"
+      },
+      {
+        "name": "location",
+        "type": "string"
+      },
+      {
+        "name": "state",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "make",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "kilometres",
+        "type": "integer"
+      },
+      {
+        "name": "url",
+        "type": "url",
+        "required": true
+      },
+      {
+        "name": "title",
+        "type": "string"
+      }
+    ]
+  }
+}
