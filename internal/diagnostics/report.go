@@ -203,6 +203,12 @@ func writeSource(b *strings.Builder, s contracts.SourceProgress, events []contra
 				warns = append(warns, ev.Message)
 			}
 		case contracts.EventError:
+			// The acquisition error that failed the source is already in
+			// "Source failed at …"; don't list it twice.
+			detail := strings.TrimPrefix(ev.Message, "could not acquire listing page: ")
+			if s.Status == contracts.SourceFailed && detail != ev.Message && strings.Contains(s.FailureReason, detail) {
+				continue
+			}
 			errs = append(errs, ev.Message)
 		}
 	}

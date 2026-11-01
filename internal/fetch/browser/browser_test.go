@@ -36,6 +36,9 @@ func site() *httptest.Server {
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, `<html><head><title>Forbidden</title></head><body>No.</body></html>`)
 	})
+	mux.HandleFunc("/forbidden-empty", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden) // no body: Chrome fails the navigation
+	})
 	mux.HandleFunc("/challenge", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<html><head><title>Just a moment...</title></head><body><div id="cf-chl-widget"></div></body></html>`)
 	})
@@ -70,6 +73,22 @@ func TestLoadReportsHTTPErrorsAndChallenges(t *testing.T) {
 	var be *fetch.BlockedError
 	if !errors.As(err, &be) {
 		t.Fatalf("challenge: %v", err)
+	}
+}
+
+// An HTTP error with an empty body makes Chrome fail the navigation itself
+// (net::ERR_HTTP_RESPONSE_CODE_FAILURE); it must still be reported as the
+// HTTP status, with both waitUntil modes.
+func TestEmptyErrorResponseIsReportedAsStatus(t *testing.T) {
+	b := newBrowser(t)
+	srv := site()
+	defer srv.Close()
+	for _, waitUntil := range []string{"load", "domcontentloaded"} {
+		_, err := b.Load(context.Background(), fetch.BrowserRequest{URL: srv.URL + "/forbidden-empty", WaitUntil: waitUntil, WaitFor: "article", Timeout: 20 * time.Second})
+		var se *fetch.StatusError
+		if !errors.As(err, &se) || se.Code != 403 {
+			t.Errorf("%s: got %v, want HTTP 403", waitUntil, err)
+		}
 	}
 }
 

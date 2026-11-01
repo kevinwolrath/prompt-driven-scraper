@@ -122,6 +122,9 @@ func TestReportExplainsEachStage(t *testing.T) {
 			t.Errorf("report is missing %q", want)
 		}
 	}
+	if strings.Contains(report, "- could not acquire listing page: ") {
+		t.Error("the acquisition failure is listed twice")
+	}
 	if t.Failed() || testing.Verbose() {
 		t.Log(report)
 	}
