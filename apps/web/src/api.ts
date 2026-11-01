@@ -34,10 +34,12 @@ export interface AcquisitionStats {
   attempts: number;
   succeeded: number;
   failed: number;
+  interactions?: number;
   lastResult?: string;
 }
 
 export interface Progress {
+  interaction?: { url: string; title?: string; reason: string; tabId: string; sourceId: string };
   currentSource?: string;
   sourcesTotal: number;
   sourcesComplete: number;
@@ -57,6 +59,7 @@ export interface Progress {
 export interface OutputField { name: string; type: string; required?: boolean }
 
 export interface Definition {
+  browserMode?: string;
   name?: string;
   queryInput?: string;
   query?: unknown;
@@ -140,6 +143,7 @@ export interface ValidateResult {
   job?: {
     name: string;
     queryInput: string;
+    browserMode?: string;
     query?: unknown;
     searchSources: { id: string; profileRef?: string; profile?: Profile }[];
     output: { format: string; fields: { name: string; type: string; required?: boolean }[] };

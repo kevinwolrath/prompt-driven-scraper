@@ -46,7 +46,7 @@ const DEMO_DEFINITION: Definition = {
 };
 
 const EVENT_TYPES = [
-  'JobStarted', 'SourceStarted', 'PageDiscovered', 'AcquisitionAttempt', 'PageFetched', 'RecordFound', 'RecordAccepted',
+  'BrowserInteractionRequired', 'BrowserInteractionResumed', 'JobStarted', 'SourceStarted', 'PageDiscovered', 'AcquisitionAttempt', 'PageFetched', 'RecordFound', 'RecordAccepted',
   'RecordRejected', 'Warning', 'Error', 'SourceCompleted', 'JobPausing', 'JobPaused', 'JobResumed',
   'JobFinalising', 'JobCompleted', 'JobPartial', 'JobCancelled', 'JobFailed',
 ];
@@ -199,6 +199,7 @@ function App() {
 // ---------------------------------------------------------------------------
 
 interface Editor {
+  browserMode: string;
   name: string;
   queryInput: string;
   queryText: string;
@@ -212,6 +213,7 @@ function toEditor(s: Session): Editor {
   const fields = d.output?.fields ?? [];
   return {
     name: s.name,
+  browserMode: d.browserMode ?? 'automatic',
     queryInput: d.queryInput ?? '',
     queryText: JSON.stringify(d.query ?? {}, null, 2),
     selected: (d.searchSources ?? []).map((src) => src.profileRef ?? src.profile?.id ?? src.id),
@@ -234,6 +236,7 @@ function toDefinition(e: Editor): Definition {
   }
   return {
     queryInput: e.queryInput,
+  browserMode: e.browserMode,
     query,
     searchSources: e.selected.map((id) => ({ id, profileRef: id })),
     output: {
@@ -391,6 +394,15 @@ function SessionView({ id, runId, onChanged }: { id: string; runId?: string; onC
               .
             </p>
           )}
+          <section className="panel">
+            <label>Browser mode <select aria-label="Browser mode" value={ed.browserMode} onChange={(e) => set({ browserMode: e.target.value })}>
+              <option value="automatic">Automatic (source profile)</option>
+              <option value="http">HTTP</option>
+              <option value="browser">Managed Browser</option>
+              <option value="user-browser">User Browser (visible persistent Chrome)</option>
+            </select></label>
+            <p className="muted small">User Browser uses a dedicated persistent Chrome profile or the operator's configured Chrome connection. Complete website interactions in Chrome, then Continue here.</p>
+          </section>
           <ConfigPanels ed={ed} set={set} profiles={profiles} />
           <div className="runbar">
             <button className="primary" onClick={run} disabled={busy || ed.selected.length === 0}
@@ -704,7 +716,7 @@ function RunPanel({ job, sessionId, onUpdate, onStatusChange }: { job: Job; sess
       if (line) setLog((l) => [line, ...l].slice(0, 500));
       setEvents((l) => [{ seq: ev.seq, type: ev.type, source: ev.sourceId, text: ev.message ?? '' }, ...l].slice(0, 2000));
       // Keep the session's run list in step with live status changes.
-      if (!wasTerminal && ev.type.startsWith('Job')) onStatusChange();
+      if (!wasTerminal && (ev.type.startsWith('Job') || ev.type.startsWith('BrowserInteraction'))) onStatusChange();
       if (terminal(ev.status)) es.close();
     };
     EVENT_TYPES.forEach((t) => es.addEventListener(t, handle as EventListener));
@@ -754,7 +766,7 @@ function RunPanel({ job, sessionId, onUpdate, onStatusChange }: { job: Job; sess
           {!done && (
             <>
               {job.status === 'paused' ? (
-                <button onClick={() => act('resume')} disabled={busy}>Resume</button>
+                <button onClick={() => act('resume')} disabled={busy}>{p.interaction ? 'Continue' : 'Resume'}</button>
               ) : (
                 <button onClick={() => act('pause')} disabled={busy || job.status !== 'running'}>Pause</button>
               )}
@@ -778,6 +790,12 @@ function RunPanel({ job, sessionId, onUpdate, onStatusChange }: { job: Job; sess
         </div>
       </div>
 
+      {p.interaction && !done && <section className="notice" role="status">
+        <h3>Browser interaction required</h3>
+        <p>The website requires interaction in Chrome. Complete the requested action in the browser, then return here and press Continue.</p>
+        <p>{p.interaction.title} — {p.interaction.reason}</p>
+        <p className="small">{p.interaction.url}</p>
+      </section>}
       <Totals p={p} />
 
       <table className="source-table">
@@ -865,10 +883,10 @@ function SourceDiagnostics({ sources }: { sources: SourceProgress[] }) {
                 {used.length === 0 && <span className="muted">not started</span>}
                 {used.map((a, i) => {
                   const ok = a.succeeded > 0;
-                  const label = ({ http: 'HTTP', browser: 'Browser' } as Record<string, string>)[a.strategy] ?? a.strategy;
+                  const label = ({ http: 'HTTP', browser: 'Managed Browser', 'user-browser': 'User Browser' } as Record<string, string>)[a.strategy] ?? a.strategy;
                   return (
                     <span key={a.strategy} className={`attempt ${ok ? 'ok' : 'bad'}`}>
-                      {ok ? '✓' : '✗'} {label}{i > 0 ? ' fallback' : ''}: {ok && a.failed === 0 ? 'page loaded' : a.lastResult}
+                      {ok ? '✓' : '✗'} {label}{i > 0 ? ' fallback' : ''}: {a.succeeded === a.attempts ? 'page loaded' : a.lastResult}
                       <small className="muted"> ({a.succeeded}/{a.attempts} ok)</small>
                     </span>
                   );
@@ -966,8 +984,8 @@ function logLine(ev: JobEvent): LogLine | null {
 }
 
 function reasonOf(ev: JobEvent, current?: string) {
-  if (['JobPartial', 'JobFailed', 'JobCancelled', 'JobPaused'].includes(ev.type)) return ev.message;
-  if (ev.type === 'JobResumed') return undefined;
+  if (['JobPartial', 'JobFailed', 'JobCancelled', 'JobPaused', 'BrowserInteractionRequired'].includes(ev.type)) return ev.message;
+  if (ev.type === 'JobResumed' || ev.type === 'BrowserInteractionResumed') return undefined;
   return current;
 }
 
