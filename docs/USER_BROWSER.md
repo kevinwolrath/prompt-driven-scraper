@@ -78,7 +78,7 @@ The API does not close the externally running visible Chrome or pending interact
 
 If Chrome itself or the waiting tab was closed, Continue reports an attachment error; start a new run after reopening Chrome. Browser state on disk persists, but a vanished tab's exact DOM cannot be restored. An HTTP status may be unavailable when attaching to a page loaded while the API was disconnected; diagnostics omit unknown status rather than inventing 200. Only the requested origin's DOM is read; navigate back to the source before continuing from another origin.
 
-User Browser start/Continue API calls require a local operator connection. Unrelated web origins cannot control the local API through permissive CORS. This feature is intended for local interactive execution, not unattended hosted workers.
+User Browser start/Continue API calls require a local operator connection. User Browser operations reject unrelated web origins; the existing HTTP API CORS behaviour is preserved. This feature is intended for local interactive execution, not unattended hosted workers.
 
 ## Diagnostics and verification
 

@@ -192,23 +192,19 @@ func TestSessionRunFlowSurvivesRestart(t *testing.T) {
 		t.Fatalf("resuming a finished run: %d", code)
 	}
 }
-func TestForeignWebOriginCannotControlLocalBrowser(t *testing.T) {
-	called := false
-	handler := cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true; w.WriteHeader(200) }))
+func TestUserBrowserRejectsForeignOriginAndAllowsLocalUI(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://localhost:8080/api/sessions/x/runs", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
 	req.Header.Set("Origin", "https://unrelated.example")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden || called {
-		t.Fatalf("foreign origin reached control handler: %d", rr.Code)
+	if localOperator(req) {
+		t.Fatal("foreign website was allowed to operate User Browser")
 	}
 	req.Header.Set("Origin", "http://localhost:5173")
-	rr = httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != 200 || !called || rr.Header().Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
+	if !localOperator(req) {
 		t.Fatal("local development UI was refused")
 	}
 }
+
 func TestLocalOperatorRejectsRemoteClientsAndReboundHost(t *testing.T) {
 	for _, tc := range []struct {
 		host, remote string

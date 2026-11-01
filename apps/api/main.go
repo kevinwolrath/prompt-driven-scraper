@@ -560,16 +560,7 @@ func nonNilRecords(r []contracts.Record) []contracts.Record {
 // cors allows a separately served UI (e.g. the Vite dev server) to call the API.
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			u, err := url.Parse(origin)
-			if err != nil || u.Host != r.Host && !loopbackHost(u.Hostname()) {
-				writeError(w, http.StatusForbidden, errors.New("request origin is not an allowed application origin"))
-				return
-			}
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		if r.Method == http.MethodOptions {
@@ -604,6 +595,12 @@ func loopbackHost(host string) bool {
 	return host == "localhost" || ip != nil && ip.IsLoopback()
 }
 func localOperator(r *http.Request) bool {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !loopbackHost(u.Hostname()) {
+			return false
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	requestHost := r.Host
 	if h, _, e := net.SplitHostPort(requestHost); e == nil {
