@@ -1,0 +1,48 @@
+id: autotrader-public
+name: Autotrader Australia public listings
+format: html
+request:
+  url: https://www.autotrader.com.au/for-sale/used/toyota/prius/vic
+limits:
+  maxPages: 1
+  maxRecords: 100
+  delayMs: 1500
+  retries: 0
+  timeoutSeconds: 30
+listing:
+  items: section.carListing--wrapper
+fields:
+  make:
+    css: a.carListing
+    attr: href
+    transform: [{regex: '/car/[^/]+/([^/]+)/'}, trim]
+  model:
+    css: a.carListing
+    attr: href
+    transform: [{regex: '/car/[^/]+/[^/]+/([^/]+)/'}, trim]
+  state:
+    css: .carListing--location
+    transform: [{regex: ',\s*([A-Z]+)$'}, upper]
+  title: {css: h2.carListing--title}
+  year:
+    css: h2.carListing--title
+    transform: [{regex: '^(\d{4})'}, integer]
+  price:
+    css: .carListingPrice--advertisedPrice
+    transform: [currency, decimal]
+  kilometres:
+    css: .carListing--mileage
+    transform: [number, integer]
+  sellerType:
+    css: .carListing--adType
+    transform: [{regex: '^([^:]+):'}, trim]
+  location: {css: .carListing--location}
+  url:
+    css: a.carListing
+    attr: href
+    transform: [absoluteUrl]
+notes:
+  - Verified against public server-rendered HTML on 2026-11-01. No browser required.
+  - Extract advertised price only; previous prices and finance values are excluded.
+  - Make and model come from each listing URL; state and seller type come from each card.
+  - Bounded first-page sample. This profile does not claim to exhaust the search.

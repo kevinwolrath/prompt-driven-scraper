@@ -26,6 +26,11 @@ const (
 
 // Report renders the diagnostics for one run.
 func Report(job contracts.Job, events []contracts.Event) string {
+	job, events, scrub := sanitise(job, events)
+	return scrub(report(job, events))
+}
+
+func report(job contracts.Job, events []contracts.Event) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 	p := job.Progress
@@ -92,7 +97,7 @@ func Report(job contracts.Job, events []contracts.Event) string {
 		}
 	}
 
-	w("CONFIGURATION (snapshot used by this run; source profiles inline)")
+	w("CONFIGURATION (snapshot used by this run; source profiles inline; credentials redacted)")
 	cfg, err := yaml.Marshal(job.Definition)
 	if err != nil {
 		w("(could not render: %v)", err)
@@ -121,6 +126,10 @@ func Report(job contracts.Job, events []contracts.Event) string {
 			msg = ": " + msg
 		}
 		w("%s %s%s%s", ev.Timestamp.UTC().Format("15:04:05.000"), src, ev.Type, msg)
+		if ev.Type == contracts.EventAcquisitionAttempt {
+			data, _ := json.Marshal(ev.Data)
+			w("  %s", data)
+		}
 		n++
 	}
 	return b.String()

@@ -345,3 +345,7 @@ Until then `-store d1` fails at startup instead of pretending.
 - No date output type yet.
 - One process per database: two API instances must not share a SQLite file.
 - No housekeeping (deleting sessions or runs) yet.
+
+## Real-world verification
+
+See [the live Carsales/Autotrader report](docs/real-world/README.md) and reproducible configurations in [examples/real-world](examples/real-world). Carsales is access-blocked; Autotrader produced persisted, filtered vehicle records. Samples are bounded to one listing page.

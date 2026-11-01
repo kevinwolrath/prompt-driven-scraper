@@ -118,3 +118,16 @@ func TestUnavailableBrowser(t *testing.T) {
 		t.Fatal("expected an error without a browser")
 	}
 }
+func TestChallengeTimeoutPreservesPageEvidence(t *testing.T) {
+	b := newBrowser(t)
+	srv := site()
+	defer srv.Close()
+	resp, err := b.Load(context.Background(), fetch.BrowserRequest{URL: srv.URL + "/challenge", WaitFor: "article", Timeout: 1500 * time.Millisecond})
+	var be *fetch.BlockedError
+	if !errors.As(err, &be) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("challenge wait: %v", err)
+	}
+	if resp.Title != "Just a moment..." || resp.URL != srv.URL+"/challenge" || resp.StatusCode != 200 || len(resp.Body) == 0 {
+		t.Fatalf("lost evidence: %+v", resp)
+	}
+}
